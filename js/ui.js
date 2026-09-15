@@ -678,7 +678,7 @@ const UI = (() => {
   /* ───────────────── ark ───────────────── */
   function openSheet(html) {
     const s = $("sheet");
-    s.innerHTML = `<div class="grab"></div>${html}`;
+    s.innerHTML = `<div class="grabsone"><div class="grab"></div></div>${html}`;
     s.style.transform = "";
     s.scrollTop = 0;
     $("sheetBg").hidden = false;
@@ -701,10 +701,16 @@ const UI = (() => {
     let startY = 0, dy = 0, dragging = false, kandidat = false;
 
     s.addEventListener("pointerdown", e => {
-      if (e.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
-      if (s.scrollTop > 0) return;
+      // Draghaandtaket oeverst virker alltid, ogsaa i lange ark man har
+      // skrollet i. Ellers kan man dra i innholdet naar arket staar oeverst.
+      const iHandtak = !!e.target.closest(".grabsone");
+      if (!iHandtak) {
+        if (e.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
+        if (s.scrollTop > 0) return;
+      }
       kandidat = true; dragging = false;
       startY = e.clientY; dy = 0;
+      s.dataset.handtak = iHandtak ? "1" : "";
     });
 
     s.addEventListener("pointermove", e => {
@@ -714,7 +720,8 @@ const UI = (() => {
       // Vent til bevegelsen tydelig går nedover før vi tar over, ellers
       // stjeler vi skrollingen i lange ark.
       if (!dragging) {
-        if (d < 8) { if (d < -8) kandidat = false; return; }
+        const terskel = s.dataset.handtak ? 3 : 8;
+        if (d < terskel) { if (d < -terskel) kandidat = false; return; }
         dragging = true;
         s.classList.add("dragging");
       }
