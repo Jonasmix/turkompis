@@ -422,13 +422,37 @@ const UI = (() => {
      på den, blir den stående åpen til du lukker den selv. */
   const kartTimere = new Set();
 
+  /* Animasjonene skal spille én gang — når boksen faktisk skifter form.
+     Chatten tegnes på nytt hver gang det kommer en melding, og uten denne
+     lista ville alle kartbokser i samtalen hoppe til hver gang. */
+  const kartNy = new Set();
+  const roligBevegelse = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* Bytter tilstand. Når boksen blir mindre, får den gamle formen
+     animere seg ut først; den nye merkes så den glir inn ved neste
+     tegning. Å åpne skal derimot kjennes umiddelbart. */
+  function settKart(id, tilstand) {
+    const fra = S.kart[id] || "vis";
+    if (fra === tilstand) return;
+    const ferdig = () => { S.kart[id] = tilstand; kartNy.add(id + ":" + tilstand); render(); };
+
+    const boks = $("screen").querySelector(`.kartboks[data-kart="${CSS.escape(id)}"]`);
+    const ut = tilstand !== "liten" ? null : fra === "apen" ? "lukker" : "krymper";
+    if (!boks || !ut || roligBevegelse()) return ferdig();
+
+    boks.classList.add(ut);
+    setTimeout(ferdig, ut === "lukker" ? 170 : 220);
+  }
+
   function actionCard(a, msgId) {
     const p = S.trip.places[a.place];
     if (!p) return "";
     const day = Parse.dayOf(S.trip, a.date);
-    const tilstand = S.kart[msgId] || "vis";
+    if (!(msgId in S.kart)) { S.kart[msgId] = "vis"; kartNy.add(msgId + ":vis"); }
+    const tilstand = S.kart[msgId];
+    const ny = kartNy.delete(msgId + ":" + tilstand) ? " ny" : "";
 
-    return `<div class="kartboks ${tilstand}" data-kart="${esc(msgId)}">
+    return `<div class="kartboks ${tilstand}${ny}" data-kart="${esc(msgId)}">
       <button class="kartmerke" data-kartapne="${esc(msgId)}" aria-label="Vis veibeskrivelse">${ICON.pin}</button>
 
       <button class="kartstripe" data-kartapne="${esc(msgId)}">
@@ -462,7 +486,7 @@ const UI = (() => {
       if (kartTimere.has(id)) continue;
       kartTimere.add(id);
       setTimeout(() => {
-        if ((S.kart[id] || "vis") === "vis") { S.kart[id] = "liten"; render(); }
+        if ((S.kart[id] || "vis") === "vis") settKart(id, "liten");
       }, 6000);
     }
   }
@@ -1712,19 +1736,27 @@ const UI = (() => {
         <div class="memberlist">${med.map(p => `
           <div class="person">
             <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
-            ${leder ? (p.role === "leader"
-              ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
-              : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`) : ""}
+            ${leder && !p.me && !p.skjult ? `<span style="display:flex;gap:10px;flex:none">
+              ${p.role === "leader"
+                ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
+                : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`}
+              <button class="linkbtn" style="color:var(--danger)" data-fjern="${esc(p.id)}" data-navn="${esc(p.name)}">fjern</button>
+            </span>` : ""}
           </div>`).join("")}</div>
         ${leder ? `<p class="muted" style="margin-top:12px">Den som laget turen beholder lederrollen,
           og turen må alltid ha minst én.</p>` : ""}`;
 
       $("tmBody").addEventListener("click", async ev => {
-        const b = ev.target.closest("[data-rolle],[data-godkjenn],[data-avvis]");
+        const b = ev.target.closest("[data-rolle],[data-godkjenn],[data-avvis],[data-fjern]");
         if (!b) return;
+        // Å fjerne noen er ikke til å angre på, så vi spør først. Meldingene
+        // deres blir stående, men tilgangen forsvinner med én gang.
+        if (b.dataset.fjern &&
+            !confirm(`Fjerne ${b.dataset.navn} fra turen? Da mister de tilgangen til program og chatter, og trenger turkoden på nytt for å komme inn igjen.`)) return;
         try {
           if (b.dataset.godkjenn) await Api.godkjennDeltaker(S.trip.id, b.dataset.godkjenn);
           else if (b.dataset.avvis) await Api.avvisDeltaker(S.trip.id, b.dataset.avvis);
+          else if (b.dataset.fjern) await Api.fjernDeltaker(S.trip.id, b.dataset.fjern);
           else await Api.setMemberRole(S.trip.id, b.dataset.rolle, b.dataset.til);
           await openTrip(S.trip.id);
           sheetTripMembers();
@@ -1980,8 +2012,8 @@ const UI = (() => {
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
     if (t.dataset.skjul) return skjulOppgave(t.dataset.skjul, t.dataset.skjulid, true);
     if (t.dataset.vis) { closeSheet(); return skjulOppgave(t.dataset.vis, t.dataset.visid, false); }
-    if (t.dataset.kartapne) { S.kart[t.dataset.kartapne] = "apen"; return render(); }
-    if (t.dataset.kartlukk) { S.kart[t.dataset.kartlukk] = "liten"; return render(); }
+    if (t.dataset.kartapne) return settKart(t.dataset.kartapne, "apen");
+    if (t.dataset.kartlukk) return settKart(t.dataset.kartlukk, "liten");
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
     if (t.dataset.svar) { closeSheet(); return startSvar(t.dataset.svar); }

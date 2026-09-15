@@ -646,3 +646,111 @@ grant execute on function public.set_member_status(uuid, uuid, text) to authenti
 grant execute on function public.avvis_deltaker(uuid, uuid) to authenticated;
 
 notify pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 09 — fjerne deltakere, og en skjult admin-rolle
+-- ═══════════════════════════════════════════════════════════════
+
+-- «admin» har samme rettigheter som reiseleder, men vises ikke i appen.
+-- Den settes bare herfra, aldri fra grensesnittet.
+alter table public.members drop constraint if exists members_role_check;
+do $$
+begin
+  alter table public.members add constraint members_role_sjekk
+    check (role in ('member', 'leader', 'admin'));
+exception when duplicate_object then null;
+end $$;
+
+create or replace function public.is_trip_leader(p_trip uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.members
+    where trip_id = p_trip and user_id = auth.uid()
+      and role in ('leader', 'admin') and status = 'approved'
+  );
+$$;
+
+-- En admin skal ikke kunne fratas rollen av en reiseleder, og rollen
+-- kan ikke deles ut fra appen.
+create or replace function public.set_member_role(
+  p_trip uuid, p_user uuid, p_role text
+) returns boolean language plpgsql security definer set search_path = public as $$
+declare v_eier uuid; v_ledere int; v_naa text;
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  if p_role not in ('member', 'leader') then raise exception 'ukjent_rolle'; end if;
+  if not public.is_trip_leader(p_trip) then raise exception 'ikke_leder'; end if;
+
+  select role into v_naa from public.members
+   where trip_id = p_trip and user_id = p_user;
+  if v_naa is null then raise exception 'ikke_medlem'; end if;
+  if v_naa = 'admin' then raise exception 'kan_ikke_endres'; end if;
+
+  select created_by into v_eier from public.trips where id = p_trip;
+  if p_user = v_eier and p_role <> 'leader' then raise exception 'eier_beholder_rollen'; end if;
+
+  if p_role = 'member' then
+    select count(*) into v_ledere from public.members
+     where trip_id = p_trip and role in ('leader', 'admin') and status = 'approved';
+    if v_ledere <= 1 then raise exception 'siste_leder'; end if;
+  end if;
+
+  update public.members set role = p_role
+   where trip_id = p_trip and user_id = p_user;
+  return true;
+end; $$;
+
+-- Fjern noen fra turen. Rydder også plassen deres i private chatter,
+-- ellers ville de blitt stående som medlem av noe de ikke lenger har
+-- tilgang til.
+create or replace function public.fjern_deltaker(p_trip uuid, p_user uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare v_eier uuid; v_naa text;
+begin
+  if not public.is_trip_leader(p_trip) then raise exception 'ikke_leder'; end if;
+  if p_user = auth.uid() then raise exception 'ikke_deg_selv'; end if;
+
+  select role into v_naa from public.members where trip_id = p_trip and user_id = p_user;
+  if v_naa is null then raise exception 'ikke_medlem'; end if;
+  if v_naa = 'admin' then raise exception 'kan_ikke_endres'; end if;
+
+  select created_by into v_eier from public.trips where id = p_trip;
+  if p_user = v_eier then raise exception 'eier_kan_ikke_fjernes'; end if;
+
+  delete from public.channel_members cm
+   using public.channels c
+   where c.id = cm.channel_id and c.trip_id = p_trip and cm.user_id = p_user;
+
+  delete from public.members where trip_id = p_trip and user_id = p_user;
+  return true;
+end; $$;
+
+revoke all on function public.fjern_deltaker(uuid, uuid) from public;
+grant execute on function public.fjern_deltaker(uuid, uuid) to authenticated;
+
+-- Bytter du fra tommel til hjerte, skriver appen over raden du alt har.
+-- Det er en UPDATE, og uten en egen regel for det stopper basen den —
+-- da ble den gamle reaksjonen stående. Du kan bare endre din egen.
+drop policy if exists rea_update on public.reactions;
+create policy rea_update on public.reactions for update
+  using (user_id = auth.uid())
+  with check (public.can_read_channel(channel_id) and user_id = auth.uid());
+
+notify pgrst, 'reload schema';
+
+-- ── Slik gir du deg selv admin på en tur ───────────────────────
+-- Admin finnes bare her i basen. Appen viser den aldri: i deltakerlista
+-- står en admin som vanlig deltaker, og ingen reiseleder kan endre eller
+-- fjerne hen. Selv får du de samme knappene som en reiseleder.
+--
+-- Du må først være med på turen på vanlig vis (bruk turkoden). Så kjører
+-- du de to linjene under i SQL Editor, med din egen e-post og turkoden:
+--
+--   update public.members m
+--      set role = 'admin', status = 'approved'
+--     from public.trips t, auth.users u
+--    where m.trip_id = t.id and m.user_id = u.id
+--      and t.code = 'ABC123'
+--      and u.email = 'din@epost.no';
+--
+-- Tilbake til vanlig deltaker: bytt 'admin' med 'member' i samme spørring.

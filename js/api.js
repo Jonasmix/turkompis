@@ -115,7 +115,7 @@ const Api = (() => {
     return rader.map(r => ({
       id: r.trips.id, code: r.trips.code, name: r.trips.name, org: r.trips.org,
       dates: spenn[r.trips.id] ? datoSpenn(spenn[r.trips.id].fra, spenn[r.trips.id].til) : "",
-      role: r.role
+      role: r.role === "admin" ? "leader" : r.role
     }));
   }
 
@@ -147,6 +147,9 @@ const Api = (() => {
     if (m.includes("ikke_leder")) return new Error("Bare reiseledere kan endre roller.");
     if (m.includes("eier_beholder_rollen")) return new Error("Den som laget turen beholder lederrollen.");
     if (m.includes("siste_leder")) return new Error("Turen må ha minst én reiseleder.");
+    if (m.includes("ikke_deg_selv")) return new Error("Bruk «Meld deg av» for å gå ut selv.");
+    if (m.includes("eier_kan_ikke_fjernes")) return new Error("Den som laget turen kan ikke fjernes.");
+    if (m.includes("kan_ikke_endres")) return new Error("Denne deltakeren kan ikke endres herfra.");
     if (m.includes("ikke_innlogget")) return new Error("Appen fikk ikke kontakt med serveren. Prøv igjen.");
     return new Error(m || "Noe gikk galt.");
   }
@@ -212,7 +215,10 @@ const Api = (() => {
       krevGodkjenning: trip.require_approval === true,
       venter: member ? member.status === "pending" : false,
       dates: days.length ? datoSpenn(days[0].date, days[days.length - 1].date) : "",
-      role: member ? member.role : "member",
+      // "admin" er skjult: den gir samme rettigheter som reiseleder, men
+      // staar ingen steder i grensesnittet.
+      role: member && (member.role === "leader" || member.role === "admin") ? "leader" : "member",
+      erAdmin: !!(member && member.role === "admin"),
       places: placeMap,
       days: days.map(d => Object.assign({
         id: d.id, date: d.date, hotel: d.hotel_place_id, ignorerHotell: d.ignore_hotel === true,
@@ -418,7 +424,9 @@ const Api = (() => {
     }
     if (error) throw error;
     return (data || []).map(m => ({
-      id: m.user_id, name: m.name, role: m.role,
+      id: m.user_id, name: m.name,
+      role: m.role === "admin" ? "member" : m.role,   // admin vises ikke
+      skjult: m.role === "admin",
       venter: m.status === "pending", me: m.user_id === userId
     }));
   }
@@ -459,6 +467,11 @@ const Api = (() => {
 
   async function avvisDeltaker(tripId, personId) {
     const { error } = await sb.rpc("avvis_deltaker", { p_trip: tripId, p_user: personId });
+    if (error) throw friendly(error);
+  }
+
+  async function fjernDeltaker(tripId, personId) {
+    const { error } = await sb.rpc("fjern_deltaker", { p_trip: tripId, p_user: personId });
     if (error) throw friendly(error);
   }
   async function addPlace(tripId, { name, addr, kind, url }) {
@@ -759,7 +772,7 @@ const Api = (() => {
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
-    setKrevGodkjenning, godkjennDeltaker, avvisDeltaker,
+    setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,

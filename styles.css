@@ -482,9 +482,20 @@ label.person span{flex:1;min-width:0}
 .kartboks .kartstripe,
 .kartboks .kartkort{display:none}
 
-.kartboks.vis .kartstripe{display:inline-flex;animation:glidUt .28s ease-out}
+.kartboks.vis .kartstripe{display:inline-flex}
 .kartboks.liten .kartmerke{display:inline-grid}
-.kartboks.apen .kartkort{display:block;animation:glidUt .2s ease-out}
+.kartboks.apen .kartkort{display:block}
+
+/* «ny» settes bare den gangen boksen faktisk skifter form — ellers ville
+   alle kartbokser i samtalen hoppe til hver gang det kom en melding. */
+.kartboks.ny.vis   .kartstripe{animation:glidUt  .34s cubic-bezier(.16,.9,.3,1)}
+.kartboks.ny.vis   .kartstripe svg{animation:naala .5s cubic-bezier(.16,1.2,.3,1)}
+.kartboks.ny.liten .kartmerke {animation:sprettInn .3s cubic-bezier(.2,1.3,.35,1)}
+.kartboks.ny.apen  .kartkort  {animation:foldUt .24s cubic-bezier(.16,.9,.3,1)}
+
+/* Og ut igjen: den gamle formen krymper bort før den nye tegnes. */
+.kartboks.krymper .kartstripe{animation:krympInn .22s ease-in forwards}
+.kartboks.lukker  .kartkort  {animation:foldInn  .17s ease-in forwards}
 
 .kartstripe{
   align-items:center;gap:7px;cursor:pointer;max-width:100%;
@@ -519,10 +530,38 @@ label.person span{flex:1;min-width:0}
   min-width:32px;min-height:32px;flex:none;border-radius:50%;
 }
 
+/* Stripa gror ut fra venstre, som om den kommer ut av ordet i meldingen. */
 @keyframes glidUt{
-  from{opacity:0;transform:translateX(-10px)}
-  to{opacity:1;transform:none}
+  from{opacity:0;transform:translateX(-14px) scaleX(.9)}
+  to  {opacity:1;transform:none}
 }
+/* Nåla faller ned i kartet et lite øyeblikk etter at stripa er framme. */
+@keyframes naala{
+  0%,35%{opacity:0;transform:translateY(-7px) scale(.7)}
+  70%   {opacity:1;transform:translateY(1px) scale(1.06)}
+  100%  {opacity:1;transform:none}
+}
+@keyframes sprettInn{
+  from{opacity:0;transform:scale(.55)}
+  60% {opacity:1;transform:scale(1.08)}
+  to  {opacity:1;transform:none}
+}
+@keyframes foldUt{
+  from{opacity:0;transform:translateY(-6px) scale(.97)}
+  to  {opacity:1;transform:none}
+}
+@keyframes krympInn{
+  from{opacity:1;transform:none}
+  to  {opacity:0;transform:translateX(-10px) scale(.86)}
+}
+@keyframes foldInn{
+  from{opacity:1;transform:none}
+  to  {opacity:0;transform:translateY(-5px) scale(.97)}
+}
+.kartstripe,.kartmerke{transform-origin:left center}
+.kartkort{transform-origin:top left}
+
 @media (prefers-reduced-motion:reduce){
-  .kartboks.vis .kartstripe,.kartboks.apen .kartkort{animation:none}
+  .kartboks .kartstripe,.kartboks .kartstripe svg,
+  .kartboks .kartmerke,.kartboks .kartkort{animation:none}
 }
