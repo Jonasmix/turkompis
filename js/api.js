@@ -665,15 +665,30 @@ const Api = (() => {
 
   function epostFeil(error) {
     const m = String(error.message || "").toLowerCase();
-    if (m.includes("rate") || m.includes("too many")) {
+    console.warn("E-postfeil fra Supabase:", error.message);
+
+    // Rekkefølgen betyr noe: «Error sending confirmation email» inneholder
+    // ordet email, men handler om sending, ikke om adressen.
+    if (m.includes("sending") || m.includes("smtp") || m.includes("mailer")) {
+      return new Error("Appen fikk ikke sendt e-posten. Er SMTP satt opp i Supabase?");
+    }
+    if (m.includes("rate") || m.includes("too many") || m.includes("limit")) {
       return new Error("For mange forsøk. Vent noen minutter og prøv igjen.");
     }
-    if (m.includes("invalid") && m.includes("token")) return new Error("Koden stemte ikke. Sjekk at du skrev alle sifrene.");
+    if (m.includes("disabled") || m.includes("not allowed") || m.includes("not enabled")) {
+      return new Error("E-postinnlogging er slått av i Supabase.");
+    }
     if (m.includes("expired")) return new Error("Koden er utløpt. Be om en ny.");
-    if (m.includes("already registered") || m.includes("already been registered")) {
+    if (m.includes("token") || m.includes("otp")) {
+      return new Error("Koden stemte ikke. Sjekk at du skrev alle sifrene.");
+    }
+    if (m.includes("already registered") || m.includes("already been registered") || m.includes("already exists")) {
       return new Error("Den e-posten er alt i bruk. Logg inn med den i stedet.");
     }
-    if (m.includes("email")) return new Error("Sjekk at e-postadressen er riktig skrevet.");
+    if (m.includes("invalid") && m.includes("email")) {
+      return new Error("Sjekk at e-postadressen er riktig skrevet.");
+    }
+    // Ukjent: vis det serveren faktisk sa, så feilsøking er mulig.
     return new Error(error.message || "Noe gikk galt.");
   }
 
