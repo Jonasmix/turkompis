@@ -1,78 +1,96 @@
 # Turkompis
 
 Program, gruppechat og veibeskrivelse for klasseturer. Nettside som kan legges til på
-hjemskjermen (PWA) og virker uten nett. Ingen byggesteg — rene statiske filer, laget for
-GitHub Pages.
+hjemskjermen (PWA) og virker uten nett. Ingen byggesteg — rene statiske filer på GitHub
+Pages, med Supabase som database.
 
-## Hva som virker nå
+## Hva appen gjør
 
-- **Bli med med navn og turkode.** Prøvekoder: `BERLIN26`, `PARIS26`
-- **Flere turer.** Appen husker hvilken tur du var inne på sist og åpner den neste gang.
-- **Flere chatter per tur** — «Hele turen», gruppechatter, reiseledere. Du kan opprette nye.
-- **Møteavtaler blir til veibeskrivelse.** Skriver noen «møt på hotellet kl 18:30», kobler
-  appen det mot programmet for den dagen, finner riktig adresse og åpner Google Maps
-  eller Apple Maps. «Hotellet» slår opp riktig hotell for datoen — turene bytter hotell underveis.
-- **Program** med dagsvelger, neste hendelse og kart på hvert punkt.
-- **Offline** — service worker cacher appen. Legg til på hjemskjermen fra Del-menyen (iOS)
-  eller menyen ⋮ (Android).
+- **Reiseledere lager turer.** Tomt program, eller start fra en ferdig mal. Du får en
+  turkode på seks tegn å dele ut.
+- **Deltakere blir med** med fornavn, etternavn og turkoden.
+- **Flere turer.** Appen husker hvilken tur du så sist og åpner den neste gang.
+- **Flere chatter per tur** — hele turen, gruppechatter, reiseledere. Alle medlemmer kan
+  opprette en gruppechat.
+- **Møteavtaler blir til veibeskrivelse.** Skriver noen «møt på hotellet kl 18:30», kobles
+  det mot programmet for den dagen, og kartet åpner riktig adresse. «Hotellet» slår opp
+  hotellet dere faktisk bor på den datoen — turer bytter hotell underveis.
+- **Program** med dagsvelger, neste hendelse, og kart på hvert punkt. Reiseleder legger inn
+  dager, punkter, steder og hvilket hotell som gjelder hver dag.
+- **Offline** — appen caches, og siste turdata vises selv uten nett. Meldinger krever nett.
 
-## Hva som ikke virker ennå
+## Sett opp databasen
 
-GitHub Pages serverer bare filer — det finnes ingen server bak. Derfor:
+Appen trenger et Supabase-prosjekt. Gratisplanen holder godt for utprøving.
 
-- **Meldinger lagres kun på din egen enhet.** To telefoner ser ikke hverandres meldinger.
-- **Ingen opplasting av filer.** Program og filliste ligger i `js/data.js`.
-- **Ingen ekte AI.** Meldingstolkningen i `js/parse.js` er regelbasert og kjører lokalt.
-- **Ingen innlogging.** Turkoden er en nøkkel til et rom, ikke autentisering.
+1. **Lag prosjekt** på [supabase.com](https://supabase.com) → *New project*.
+   Velg en **region i EU** (f.eks. Frankfurt) — dette er elevdata.
+2. **Kjør skjemaet.** Åpne *SQL Editor*, lim inn hele [`supabase/schema.sql`](supabase/schema.sql)
+   og kjør. Den lager tabeller, regler for hvem som får lese og skrive, og funksjonene
+   `join_trip` og `create_trip`.
+3. **Slå på anonym pålogging.** *Authentication → Sign In / Providers → Anonymous sign-ins* → på.
+   Hver enhet får da en identitet uten at noen må lage passord.
+4. **Fyll inn nøklene** i [`js/config.js`](js/config.js). Begge finnes under
+   *Project Settings → API*:
+   - `supabaseUrl` — *Project URL*
+   - `supabaseAnonKey` — nøkkelen merket **anon public**
+
+Anon-nøkkelen er laget for å ligge åpent i en nettside. Det er reglene i databasen som
+bestemmer hva noen får lese og skrive, ikke nøkkelen. **`service_role`-nøkkelen skal aldri
+inn i dette repoet** — den går utenom alle regler.
 
 ## Kjør lokalt
 
-Service workers krever `http://`, ikke `file://`. Start en enkel server i mappa:
+Service workers krever `http://`, ikke `file://`:
 
 ```bash
 python -m http.server 8080
 ```
 
-Åpne så `http://localhost:8080`.
-
 ## Legg ut på GitHub Pages
 
-1. Push dette til et repo, f.eks. `turkompis`.
-2. **Settings → Pages → Source: Deploy from a branch**, branch `main`, mappe `/ (root)`.
-3. Siden ligger på `https://<brukernavn>.github.io/turkompis/` etter et par minutter.
-
-Alle stier i koden er relative, så appen virker like godt under et undermappe-navn som på et
-eget domene. `.nojekyll` er med for at GitHub ikke skal filtrere bort filer.
+**Settings → Pages → Source: Deploy from a branch**, branch `main`, mappe `/ (root)`.
+Alle stier er relative, så appen virker like godt i en undermappe som på eget domene.
 
 ## Filstruktur
 
 | Fil | Ansvar |
 |---|---|
-| `index.html` | Skjelettet: join-skjerm, app-skall, ark (sheets) |
+| `index.html` | Skjelettet: oppstart, join-skjerm, app-skall, ark |
 | `styles.css` | Alt av utseende, lys og mørk variant |
-| `js/data.js` | Turene — program, steder, filer, kanaler |
-| `js/store.js` | **All lesing og skriving av data.** Byttepunktet mot backend |
+| `js/config.js` | Hvilket Supabase-prosjekt appen snakker med |
+| `js/api.js` | **All kontakt med databasen.** Ingen andre filer snakker med Supabase |
 | `js/parse.js` | Melding → møtested, dato, klokkeslett |
+| `js/templates.js` | Ferdige turer for «lag eksempeltur» |
 | `js/ui.js` | Skjermer, navigasjon, hendelser |
-| `sw.js` | Offline-cache. Bump `CACHE`-navnet når du endrer filer |
+| `supabase/schema.sql` | Tabeller, radsikkerhet og funksjoner |
+| `sw.js` | Offline-cache. Bump `CACHE` når du endrer filer |
 
-Skal appen få ekte meldinger på tvers av telefoner, er det `js/store.js` som skal skrives om.
-Resten av appen kaller de samme funksjonsnavnene og trenger ingen endring.
+## Sikkerhet — hva som er på plass
 
-## Sikkerhet — ikke bygget ennå, med vilje
+Reglene ligger i databasen, ikke i appen. En bruker som omgår appen og snakker direkte med
+API-et møter de samme reglene.
 
-Dette er en utprøvingsversjon. Før den brukes av en ekte klasse må dette på plass:
+- **Radsikkerhet på alle tabeller.** Du kan bare lese turer du er medlem av. Innmelding går
+  gjennom `join_trip()`, som er den eneste veien inn.
+- **Roller.** Bare reiseledere endrer program, steder, dager og hotell. Alle medlemmer kan
+  skrive meldinger og lage gruppechatter.
+- **Meldinger** skrives i eget navn — `author_id` må være din egen bruker. Du kan slette
+  dine egne; reiseleder kan slette alle.
+- **Anonym pålogging** gir hver enhet en identitet. Ingen passord å miste.
+- **Grenser** på lengde av meldinger og antall turer per bruker.
 
-- **Ordentlig pålogging.** Engangskode på e-post eller SMS. Turkode alene betyr at hvem som
-  helst som får koden kan lese alt — og et selvvalgt navn betyr at hvem som helst kan utgi seg
-  for å være en lærer.
-- **Tilgangsstyring på serveren** (row level security), slik at du bare får lest turer og
-  kanaler du faktisk er med i. Sjekken må ligge i databasen, ikke i appen.
-- **Reiseleder-rolle** — bare de kan laste opp filer, opprette turer og fjerne deltakere.
-- **Sletting.** Meldinger og deltakerlister slettes automatisk en gitt tid etter turen.
-- **Personvern.** Dette er personopplysninger om mindreårige i skolesammenheng: skolen trenger
-  databehandleravtale, data bør ligge i EU, og en personvernkonsekvensvurdering (DPIA) er
-  sannsynligvis påkrevd. Bygges inn fra start, ikke ettermonteres.
-- **Moderering.** Reiseleder må kunne slette meldinger og stenge en chat.
+## Sikkerhet — hva som gjenstår
 
-Ingen av delene er i koden nå. De kommer som eget steg.
+- **Navnet er selvvalgt.** Hvem som helst kan skrive «Kari Lund» og se ut som en lærer.
+  Fikses med engangskode på e-post eller SMS, eller ved at reiseleder godkjenner deltakere.
+- **Turkoden er en delt hemmelighet.** Lekker den, kommer hvem som helst inn. Bør kunne
+  byttes eller stenges av reiseleder når alle er med.
+- **Ingen automatisk sletting.** Meldinger og deltakerlister bør slettes en gitt tid etter
+  turen, ikke ligge til evig tid.
+- **Ingen moderering utover sletting.** Reiseleder bør kunne stenge en chat og fjerne
+  deltakere som ikke skal være der.
+- **Personvern.** Dette er personopplysninger om mindreårige i skolesammenheng. Skolen
+  trenger databehandleravtale med Supabase, og en personvernkonsekvensvurdering (DPIA) er
+  sannsynligvis påkrevd før ekte bruk.
+- **Filopplasting** er ikke bygget. Program legges inn manuelt.
