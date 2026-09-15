@@ -402,8 +402,50 @@ const UI = (() => {
   }
 
   /* ───────────────── ark ───────────────── */
-  function openSheet(html) { $("sheet").innerHTML = `<div class="grab"></div>${html}`; $("sheetBg").hidden = false; }
-  function closeSheet() { $("sheetBg").hidden = true; }
+  function openSheet(html) {
+    const s = $("sheet");
+    s.innerHTML = `<div class="grab"></div>${html}`;
+    s.style.transform = "";
+    s.scrollTop = 0;
+    $("sheetBg").hidden = false;
+  }
+  function closeSheet() {
+    $("sheetBg").hidden = true;
+    $("sheet").style.transform = "";
+  }
+
+  /* Dra arket nedover for å lukke det, slik man gjør i apper ellers.
+     Draingen starter bare når arket er skrollet helt til toppen, og aldri
+     oppå en knapp eller et skrivefelt. */
+  (function dragToClose() {
+    const s = $("sheet");
+    let startY = 0, dy = 0, dragging = false;
+
+    s.addEventListener("pointerdown", e => {
+      if (e.target.closest("input, textarea, select, button, a, label")) return;
+      if (s.scrollTop > 0) return;
+      dragging = true; startY = e.clientY; dy = 0;
+      s.classList.add("dragging");
+    });
+
+    s.addEventListener("pointermove", e => {
+      if (!dragging) return;
+      dy = Math.max(0, e.clientY - startY);
+      if (dy > 4) e.preventDefault();
+      s.style.transform = `translateY(${dy}px)`;
+    }, { passive: false });
+
+    function slipp() {
+      if (!dragging) return;
+      dragging = false;
+      s.classList.remove("dragging");
+      if (dy > 110) closeSheet();
+      else s.style.transform = "";
+    }
+    s.addEventListener("pointerup", slipp);
+    s.addEventListener("pointercancel", slipp);
+    s.addEventListener("pointerleave", slipp);
+  })();
 
   function sheetPlace(id) {
     const p = S.trip.places[id];
