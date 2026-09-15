@@ -835,61 +835,72 @@ const UI = (() => {
   }
 
   /* Dra arket nedover for å lukke det, slik man gjør i apper ellers.
-     Draingen starter bare når arket er skrollet helt til toppen, og aldri
-     oppå en knapp eller et skrivefelt. */
-  /* Dra arket nedover for å lukke det.
-     Skjemafelt og knapper skal fortsatt kunne trykkes, men alt annet —
-     overskrifter, tekst, tomme flater — er gyldig å ta tak i. Tidligere
-     utelot jeg også <label>, og siden nesten alt innhold i redigeringsark
-     ligger inne i en label, var det i praksis umulig å dra dem bort. */
+
+     iOS gir oss ikke pekerbevegelser når fingeren havner i et felt som
+     kan skrolle — nettleseren tar gesten selv. Derfor lyttes det på
+     berøring direkte, der vi kan si fra at vi tar over. Mus håndteres
+     for seg, siden den ikke sender berøringshendelser. */
   (function dragToClose() {
     const s = $("sheet");
-    let startY = 0, dy = 0, dragging = false, kandidat = false;
+    let startY = 0, dy = 0, drar = false, kandidat = false, iHandtak = false;
 
-    s.addEventListener("pointerdown", e => {
-      // Draghaandtaket oeverst virker alltid, ogsaa i lange ark man har
-      // skrollet i. Ellers kan man dra i innholdet naar arket staar oeverst.
-      const iHandtak = !!e.target.closest(".grabsone");
-      const kropp = s.querySelector(".sheetbody");
+    const kroppen = () => s.querySelector(".sheetbody");
+    const kontroll = el => el && el.closest("input, textarea, select, button, a, [contenteditable]");
+
+    function start(mål, y) {
+      iHandtak = !!(mål && mål.closest(".grabsone"));
       if (!iHandtak) {
-        if (e.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
-        // Draget starter når innholdet alt står øverst — da betyr et
-        // nedtrekk «lukk», ikke «skroll».
-        if (kropp && kropp.scrollTop > 0) return;
+        if (kontroll(mål)) return false;
+        const k = kroppen();
+        if (k && k.scrollTop > 0) return false;   // skroll, ikke lukk
       }
-      kandidat = true; dragging = false;
-      startY = e.clientY; dy = 0;
-      s.dataset.handtak = iHandtak ? "1" : "";
-    });
+      kandidat = true; drar = false; startY = y; dy = 0;
+      return true;
+    }
 
-    s.addEventListener("pointermove", e => {
-      if (!kandidat) return;
-      const d = e.clientY - startY;
-
-      // Vent til bevegelsen tydelig går nedover før vi tar over, ellers
-      // stjeler vi skrollingen i lange ark.
-      if (!dragging) {
-        const terskel = s.dataset.handtak ? 3 : 8;
-        if (d < terskel) { if (d < -terskel) kandidat = false; return; }
-        dragging = true;
+    function beveg(y, kanStoppe) {
+      if (!kandidat) return false;
+      const d = y - startY;
+      if (!drar) {
+        const terskel = iHandtak ? 3 : 10;
+        if (d < terskel) { if (d < -terskel) kandidat = false; return false; }
+        // Har innholdet rukket å skrolle i mellomtiden, er dette en skroll.
+        const k = kroppen();
+        if (!iHandtak && k && k.scrollTop > 0) { kandidat = false; return false; }
+        drar = true;
         s.classList.add("dragging");
       }
-
       dy = Math.max(0, d);
-      e.preventDefault();
       s.style.transform = `translateY(${dy}px)`;
-    }, { passive: false });
+      return kanStoppe;
+    }
 
-    function slipp() {
+    function slutt() {
       kandidat = false;
-      if (!dragging) return;
-      dragging = false;
+      if (!drar) return;
+      drar = false;
       s.classList.remove("dragging");
       if (dy > 100) closeSheet();
       else s.style.transform = "";
     }
-    s.addEventListener("pointerup", slipp);
-    s.addEventListener("pointercancel", slipp);
+
+    // Berøring
+    s.addEventListener("touchstart", e => {
+      if (e.touches.length !== 1) return;
+      start(e.target, e.touches[0].clientY);
+    }, { passive: true });
+
+    s.addEventListener("touchmove", e => {
+      if (beveg(e.touches[0].clientY, true) && e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    s.addEventListener("touchend", slutt);
+    s.addEventListener("touchcancel", slutt);
+
+    // Mus
+    s.addEventListener("mousedown", e => { if (e.button === 0) start(e.target, e.clientY); });
+    window.addEventListener("mousemove", e => { if (kandidat) beveg(e.clientY, false); });
+    window.addEventListener("mouseup", slutt);
   })();
 
   function sheetPlace(id) {
