@@ -8,8 +8,8 @@
    eller noe annet sted i dette repoet. */
 
 const CONFIG = {
-  supabaseUrl: "",      // f.eks. https://abcdefghijkl.supabase.co
-  supabaseAnonKey: ""   // "anon public"-nøkkelen fra Project Settings → API
+  supabaseUrl: "https://uybyyecmiqcqzumahltx.supabase.co",
+  supabaseAnonKey: "sb_publishable_Xfi5jUmR3ST1PoZ0_yy-ew_jaBzBiK_"
 };
 
 CONFIG.ready = Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);

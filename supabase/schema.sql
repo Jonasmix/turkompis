@@ -110,6 +110,7 @@ alter table public.messages enable row level security;
 
 drop policy if exists trips_read   on public.trips;
 drop policy if exists trips_write  on public.trips;
+drop policy if exists trips_delete on public.trips;
 drop policy if exists mem_read     on public.members;
 drop policy if exists mem_leave    on public.members;
 drop policy if exists mem_kick     on public.members;
@@ -130,6 +131,7 @@ drop policy if exists msg_delete   on public.messages;
 create policy trips_read  on public.trips for select using (public.is_trip_member(id));
 create policy trips_write on public.trips for update using (public.is_trip_leader(id))
                                           with check (public.is_trip_leader(id));
+create policy trips_delete on public.trips for delete using (public.is_trip_leader(id));
 
 -- Deltakere: medlemmer ser hvem andre som er med. Innmelding går gjennom join_trip().
 create policy mem_read  on public.members for select using (public.is_trip_member(trip_id));

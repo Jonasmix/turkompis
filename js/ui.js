@@ -286,6 +286,7 @@ const UI = (() => {
         <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
         <button class="btn" data-sheet="about">Om appen og personvern</button>
         <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
+        ${trip.role === "leader" ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
         <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
       </div>`;
   }
@@ -640,7 +641,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],#tripBtn,#meBtn,#resetBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],#tripBtn,#meBtn,#resetBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -680,6 +681,19 @@ const UI = (() => {
     if (t.dataset.delmsg) {
       try { await Api.deleteMessage(t.dataset.delmsg, S.channel); render(); }
       catch { toast("Klarte ikke slette meldingen."); }
+      return;
+    }
+    if (t.dataset.deltrip) {
+      const trip = S.trip;
+      if (!confirm(`Slette «${trip.name}» for alle? Program, chatter og meldinger forsvinner for godt.`)) return;
+      if (prompt("Skriv turkoden for å bekrefte:") !== trip.code) return toast("Koden stemte ikke. Ingenting er slettet.");
+      try {
+        await Api.deleteTrip(t.dataset.deltrip);
+        S.trips = await Api.myTrips().catch(() => []);
+        if (S.trips.length) { S.tab = "program"; await openTrip(S.trips[0].id); }
+        else { Api.setLastTrip(null); showJoin(); }
+        toast("Turen er slettet.");
+      } catch { toast("Klarte ikke slette turen."); }
       return;
     }
     if (t.dataset.leave) {

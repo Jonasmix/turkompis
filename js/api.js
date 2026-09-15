@@ -293,6 +293,16 @@ const Api = (() => {
     if (error) throw error;
   }
 
+  async function deleteTrip(tripId) {
+    const { error } = await sb.from("trips").delete().eq("id", tripId);
+    if (error) throw error;
+    // Uten sletteregelen i basen svarer API-et med suksess uten aa slette noe.
+    // Sjekk derfor at raden faktisk er borte for vi melder at det gikk bra.
+    const { data } = await sb.from("trips").select("id").eq("id", tripId).maybeSingle();
+    if (data) throw new Error("Databasen tillot ikke sletting. Kjor supabase/patch-01-slett-tur.sql i Supabase.");
+    try { localStorage.removeItem(LS.snapshot(tripId)); } catch {}
+  }
+
   async function leaveTrip(tripId) {
     const { error } = await sb.from("members").delete().eq("trip_id", tripId).eq("user_id", userId);
     if (error) throw error;
@@ -330,7 +340,7 @@ const Api = (() => {
   return {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
-    myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip,
+    myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, sendMessage, deleteMessage, onChange,
     addChannel, addPlace, addDay, setHotel, addItem, deleteItem, deleteDay,
     applyTemplate, signOutLocal
