@@ -11,7 +11,7 @@ const Api = (() => {
   let sb = null;                 // Supabase-klienten
   let userId = null;
   let liveSub = null;            // abonnement på nye meldinger
-  const cache = { trip: null, messages: {} };
+  const cache = { trip: null, messages: {}, recent: {} };
   const listeners = new Set();
 
   const LS = {
@@ -185,6 +185,25 @@ const Api = (() => {
 
   function messages(channelId) { return cache.messages[channelId] || []; }
 
+  /* Siste melding i hver chat — det chatlista viser under navnet. */
+  function lastByChannel() { return cache.recent || {}; }
+
+  async function loadRecent(tripId) {
+    if (!online()) return lastByChannel();
+    const { data, error } = await sb
+      .from("messages").select("channel_id, txt, author_name, created_at, author_id")
+      .eq("trip_id", tripId).order("created_at", { ascending: false }).limit(300);
+    if (error) throw error;
+    const map = {};
+    for (const m of (data || [])) {
+      if (!map[m.channel_id]) {
+        map[m.channel_id] = { txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId };
+      }
+    }
+    cache.recent = map;
+    return map;
+  }
+
   async function loadMessages(tripId, channelId) {
     if (!online()) return messages(channelId);
     const { data, error } = await sb
@@ -192,7 +211,6 @@ const Api = (() => {
       .eq("channel_id", channelId).order("created_at").limit(300);
     if (error) throw error;
     cache.messages[channelId] = (data || []).map(shape);
-    subscribe(channelId);
     return cache.messages[channelId];
   }
 
@@ -201,22 +219,31 @@ const Api = (() => {
     ts: m.created_at, action: m.action || null, mine: m.author_id === userId
   });
 
-  function subscribe(channelId) {
+  /* Ett abonnement for hele turen, ikke ett per chat: da oppdateres både
+     chatlista og den samtalen som står åpen. Radsikkerheten sørger for at
+     vi bare får hendelser fra chatter vi har lov til å lese. */
+  function subscribeTrip(tripId) {
     if (liveSub) { sb.removeChannel(liveSub); liveSub = null; }
-    liveSub = sb.channel("msg-" + channelId)
+    liveSub = sb.channel("trip-" + tripId)
       .on("postgres_changes",
-          { event: "INSERT", schema: "public", table: "messages", filter: `channel_id=eq.${channelId}` },
+          { event: "INSERT", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
           payload => {
-            const list = cache.messages[channelId] || (cache.messages[channelId] = []);
-            if (list.some(m => m.id === payload.new.id)) return;
-            list.push(shape(payload.new));
-            list.sort((a, b) => a.ts.localeCompare(b.ts));
+            const m = payload.new;
+            const list = cache.messages[m.channel_id];
+            if (list && !list.some(x => x.id === m.id)) {
+              list.push(shape(m));
+              list.sort((a, b) => a.ts.localeCompare(b.ts));
+            }
+            cache.recent = cache.recent || {};
+            cache.recent[m.channel_id] = {
+              txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId
+            };
             fire();
           })
       .on("postgres_changes",
-          { event: "DELETE", schema: "public", table: "messages", filter: `channel_id=eq.${channelId}` },
+          { event: "DELETE", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
           payload => {
-            const list = cache.messages[channelId];
+            const list = cache.messages[payload.old.channel_id];
             if (!list) return;
             const i = list.findIndex(m => m.id === payload.old.id);
             if (i > -1) { list.splice(i, 1); fire(); }
@@ -236,6 +263,7 @@ const Api = (() => {
     if (error) throw error;
     const list = cache.messages[channelId] || (cache.messages[channelId] = []);
     if (!list.some(m => m.id === data.id)) { list.push(shape(data)); }
+    cache.recent[channelId] = { txt: data.txt, who: data.author_name, ts: data.created_at, mine: true };
     return data.id;
   }
 
@@ -374,7 +402,7 @@ const Api = (() => {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
-    messages, loadMessages, sendMessage, deleteMessage, onChange,
+    messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember,
     addPlace, addDay, setHotel, addItem, deleteItem, deleteDay,
     applyTemplate, signOutLocal

@@ -13,12 +13,15 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%}
+/* Selve dokumentet står stille. Bare innholdsfeltet skroller — ellers
+   drar mobilnettleseren siden opp og ned og blotter bakgrunnen under. */
+html{height:100%}
 body{
-  margin:0; background:var(--ground); color:var(--ink);
+  margin:0; background:var(--surface); color:var(--ink);
   font-family:"Source Sans 3",system-ui,-apple-system,"Segoe UI",sans-serif;
   font-size:16px; line-height:1.5; -webkit-text-size-adjust:100%;
-  overscroll-behavior-y:none;
+  position:fixed; inset:0; width:100%; height:100%; overflow:hidden;
+  overscroll-behavior:none;
 }
 h1,h2,h3,h4{font-family:"Archivo",system-ui,sans-serif;margin:0;text-wrap:balance;letter-spacing:-.01em}
 .mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
@@ -42,7 +45,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .linkbtn{background:none;border:0;padding:0;color:var(--blue);font-weight:600;cursor:pointer;text-decoration:underline;font-size:inherit}
 
 /* ---------- join ---------- */
-.join{min-height:100dvh;display:grid;place-items:center;padding:28px 20px calc(28px + var(--safe-b));background:var(--ground)}
+.join{height:100%;overflow-y:auto;overscroll-behavior:contain;display:grid;place-items:center;padding:28px 20px calc(28px + var(--safe-b));background:var(--ground)}
 .join-inner{width:100%;max-width:400px}
 .mark{width:52px;height:52px;margin-bottom:18px}
 .mark svg{width:100%;height:100%;fill:none;stroke:var(--blue);stroke-width:2.2;stroke-linejoin:round}
@@ -59,7 +62,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .demohint{font-size:13.5px;color:var(--ink-3);margin-top:18px;text-align:center}
 
 /* ---------- app shell ---------- */
-.app{display:flex;flex-direction:column;height:100dvh;max-width:560px;margin:0 auto;background:var(--surface);
+.app{display:flex;flex-direction:column;height:100%;max-width:560px;margin:0 auto;background:var(--surface);
   border-inline:1px solid var(--line-soft)}
 @media (max-width:600px){.app{border-inline:0}}
 .apphead{
@@ -73,7 +76,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .avatar{width:38px;height:38px;border-radius:50%;border:0;background:var(--blue-soft);color:var(--blue-ink);
   display:grid;place-items:center;font-family:"Archivo",sans-serif;font-weight:600;font-size:14px;flex:none;cursor:pointer}
 
-.screen{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;display:flex;flex-direction:column;gap:16px;-webkit-overflow-scrolling:touch}
+.screen{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding:16px;display:flex;flex-direction:column;gap:16px;-webkit-overflow-scrolling:touch}
 .screen>*{min-width:0}
 
 .tabbar{display:flex;flex:none;border-top:1px solid var(--line-soft);background:var(--surface);
@@ -131,7 +134,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .ev.now{background:linear-gradient(90deg,var(--amber-soft),transparent 72%);margin-inline:-9px;padding-inline:9px;border-radius:10px}
 
 /* ---------- chat ---------- */
-.msgs{display:flex;flex-direction:column;gap:14px;flex:1;justify-content:flex-end;min-height:0}
+.msgs{display:flex;flex-direction:column;gap:14px;margin-top:auto}
 .msg{max-width:90%;display:flex;flex-direction:column;gap:3px}
 .msg .who{font-family:"Archivo",sans-serif;font-size:11.5px;font-weight:600;color:var(--ink-3);padding-left:3px}
 .msg .who b{color:var(--blue);font-weight:600}
@@ -222,8 +225,6 @@ button,input,select,textarea{font:inherit;color:inherit}
   box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;text-align:center}
 
 /* ---------- deltakere i chat ---------- */
-.chanbar{display:flex;align-items:center;justify-content:space-between;gap:10px;
-  font-size:12.5px;color:var(--ink-3);padding:2px 2px 0}
 .memberlist{border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}
 .person{display:flex;align-items:center;justify-content:space-between;gap:10px;
   padding:12px 13px;border-bottom:1px solid var(--line-soft);font-size:14.5px;min-height:48px;cursor:pointer}
@@ -237,3 +238,39 @@ label.person{cursor:pointer}
 label.person{justify-content:flex-start}
 label.person span{flex:1;min-width:0}
 #memberList{max-height:min(46vh,320px);overflow-y:auto}
+
+/* ---------- chatliste (Snapchat-stil) ---------- */
+.chatlist{display:flex;flex-direction:column;margin:-4px -4px 0}
+.chatrow{
+  display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;width:100%;
+  border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer;
+  padding:13px 4px;border-bottom:1px solid var(--line-soft);min-height:66px;
+}
+.chatrow:last-child{border-bottom:0}
+.chatrow .ava{
+  width:44px;height:44px;border-radius:50%;background:var(--blue-soft);color:var(--blue-ink);
+  display:grid;place-items:center;font-family:"Archivo",sans-serif;font-weight:700;font-size:15px;
+}
+.chatrow .ava.locked{background:var(--amber-soft);color:var(--amber)}
+.chatrow .nm{font-family:"Archivo",sans-serif;font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:6px}
+.chatrow .last{font-size:13.5px;color:var(--ink-2);margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.chatrow .last em{font-style:normal;color:var(--ink-3)}
+.chatrow .when{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);align-self:flex-start;padding-top:3px}
+
+/* ---------- samtaleoverskrift ---------- */
+.convhead{
+  display:flex;align-items:center;gap:10px;flex:none;
+  padding:9px 10px 9px 6px;border-bottom:1px solid var(--line-soft);background:var(--surface);
+}
+.convhead .back{
+  width:40px;height:40px;border:0;background:none;cursor:pointer;display:grid;place-items:center;
+  border-radius:50%;color:var(--ink);flex:none;
+}
+.convhead .back svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.convhead .t{flex:1;min-width:0}
+.convhead .t b{display:block;font-family:"Archivo",sans-serif;font-size:16px;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.convhead .t small{display:block;font-size:11.5px;color:var(--ink-3)}
+.convhead .who{border:1px solid var(--line);background:var(--surface);border-radius:9px;
+  font-family:"Archivo",sans-serif;font-weight:600;font-size:12px;padding:8px 11px;cursor:pointer;flex:none;min-height:40px}

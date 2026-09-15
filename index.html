@@ -62,12 +62,20 @@
 
 <!-- ============ APP ============ -->
 <section id="appScreen" class="app" hidden>
-  <header class="apphead">
+  <header class="apphead" id="apphead">
     <button class="tripbtn" id="tripBtn" aria-haspopup="dialog">
       <span class="tripname" id="tripName">—</span>
       <span class="tripsub" id="tripSub">—</span>
     </button>
     <button class="avatar" id="meBtn" aria-label="Din profil"><span id="avatarText">–</span></button>
+  </header>
+
+  <header class="convhead" id="convhead" hidden>
+    <button class="back" id="backBtn" aria-label="Tilbake til chattene">
+      <svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg>
+    </button>
+    <div class="t"><b id="convName">—</b><small id="convSub">—</small></div>
+    <button class="who" id="convWho" data-members="">Deltakere</button>
   </header>
 
   <div id="banner"></div>

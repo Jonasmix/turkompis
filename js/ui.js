@@ -2,13 +2,20 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "program", day: null, channel: null, trips: [], edit: false, offline: false, busy: false };
+  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   const today = () => new Date().toISOString().slice(0, 10);
   const clock = iso => new Date(iso).toLocaleTimeString("nb-NO", { hour:"2-digit", minute:"2-digit" });
 
+  function shortStamp(iso) {
+    const d = new Date(iso);
+    if (d.toDateString() === new Date().toDateString()) return clock(iso);
+    const dager = Math.round((Date.now() - d) / 86400000);
+    if (dager < 7) return d.toLocaleDateString("nb-NO", { weekday: "short" }).replace(".", "");
+    return d.toLocaleDateString("nb-NO", { day: "numeric", month: "short" }).replace(".", "");
+  }
   function dayStamp(iso) {
     const d = new Date(iso);
     return d.toDateString() === new Date().toDateString()
@@ -95,8 +102,8 @@ const UI = (() => {
     Api.setLastTrip(tripId);
     S.day = Parse.baseDate(trip) || (trip.days[0] ? trip.days[0].date : null);
 
-    const saved = Api.getLastChannel(tripId);
-    S.channel = trip.channels.some(c => c.id === saved) ? saved : (trip.channels[0] ? trip.channels[0].id : null);
+    // Bytter du tur, lukkes samtalen du hadde åpen.
+    S.openChat = null;
 
     $("bootScreen").hidden = true;
     $("joinScreen").hidden = true;
@@ -106,14 +113,11 @@ const UI = (() => {
     $("avatarText").textContent = p ? p.initials : "–";
 
     render();
-    if (S.tab === "chat") loadChat();
+    if (!S.offline) {
+      Api.subscribeTrip(tripId);
+      Api.loadRecent(tripId).then(() => { if (S.tab === "chat" && !S.openChat) render(); }).catch(() => {});
+    }
     Api.myTrips().then(t => { S.trips = t; }).catch(() => {});
-  }
-
-  async function loadChat() {
-    if (!S.channel || S.offline) return;
-    try { await Api.loadMessages(S.trip.id, S.channel); render(); }
-    catch (e) { toast("Klarte ikke hente meldinger."); }
   }
 
   /* ───────────────── program ───────────────── */
@@ -223,17 +227,35 @@ const UI = (() => {
     </div>`;
   }
 
-  function viewChat() {
-    const chips = S.trip.channels.map(c =>
-      `<button class="chip" aria-pressed="${c.id === S.channel}" data-channel="${esc(c.id)}">${c.private ? "&#128274; " : ""}${esc(c.name)}<span>${esc(c.sub || (c.private ? "privat" : ""))}</span></button>`
-    ).join("") + `<button class="chip" data-sheet="newchannel" style="border-style:dashed">+ Ny chat<span>i denne turen</span></button>`;
+  /* Chatten har to nivåer, som i Snapchat: en liste, og én åpen samtale.
+     S.openChat holder hvilken samtale som er framme; null betyr lista. */
+  function viewChatList() {
+    const recent = Api.lastByChannel();
+    const rows = S.trip.channels.map(c => {
+      const last = recent[c.id];
+      const initials = c.name.split(/\s+/).slice(0, 2).map(w => w[0] || "").join("").toUpperCase();
+      return `<button class="chatrow" data-openchat="${esc(c.id)}">
+        <span class="ava ${c.private ? "locked" : ""}">${c.private ? "&#128274;" : esc(initials)}</span>
+        <span class="grow" style="min-width:0">
+          <span class="nm">${esc(c.name)}</span>
+          <span class="last">${last
+            ? `<em>${esc(last.mine ? "Du" : last.who.split(" ")[0])}:</em> ${esc(last.txt)}`
+            : `<em>${esc(c.sub || "Ingen meldinger ennå")}</em>`}</span>
+        </span>
+        <span class="when">${last ? esc(shortStamp(last.ts)) : ""}</span>
+      </button>`;
+    }).join("");
 
-    if (!S.channel) {
-      return `<div class="chips">${chips}</div>
-        <p class="muted" style="text-align:center;padding:30px 0">Ingen chatter i turen ennå.</p>`;
+    return `<div class="chatlist">${rows}</div>
+      <button class="btn" data-sheet="newchannel" style="width:100%">Ny chat</button>
+      <p class="muted">En chat er enten åpen for hele turen, eller privat for dem du legger til.</p>`;
+  }
+
+  function viewConversation() {
+    const msgs = Api.messages(S.openChat);
+    if (!msgs.length && S.loadingChat) {
+      return `<p class="muted" style="text-align:center;padding:30px 0">Henter meldinger…</p>`;
     }
-
-    const msgs = Api.messages(S.channel);
     const body = msgs.length ? msgs.map(m => `<div class="msg ${m.mine ? "me" : ""}">
         ${m.mine ? "" : `<div class="who">${esc(m.who)}${m.role ? ` <b>· ${esc(m.role)}</b>` : ""}</div>`}
         <div class="bubble">${esc(m.txt)}</div>
@@ -241,14 +263,11 @@ const UI = (() => {
         ${m.action ? actionCard(m.action) : ""}
       </div>`).join("")
       : `<p class="muted" style="text-align:center;padding:30px 0">Ingen meldinger her ennå. Skriv den første.</p>`;
+    return `<div class="msgs" id="msgs">${body}</div>`;
+  }
 
-    const ch = S.trip.channels.find(c => c.id === S.channel);
-    const bar = `<div class="chanbar">
-      <span>${ch && ch.private ? "&#128274; Privat — bare de som er lagt til" : "Åpen for alle på turen"}</span>
-      <button class="linkbtn" data-members="${esc(S.channel)}">Deltakere</button>
-    </div>`;
-
-    return `<div class="chips">${chips}</div>${bar}<div class="msgs" id="msgs">${body}</div>`;
+  function viewChat() {
+    return S.openChat ? viewConversation() : viewChatList();
   }
 
   /* ───────────────── meg ───────────────── */
@@ -300,8 +319,20 @@ const UI = (() => {
   /* ───────────────── tegning ───────────────── */
   function render() {
     if (!S.trip) return;
-    $("tripName").textContent = S.trip.name;
-    $("tripSub").textContent = [S.trip.org, S.trip.dates].filter(Boolean).join(" · ") || ("Kode " + S.trip.code);
+    const conv = S.tab === "chat" && S.openChat
+      ? S.trip.channels.find(c => c.id === S.openChat) : null;
+
+    // Når en samtale er åpen bytter toppen til samtalens egen overskrift.
+    $("apphead").hidden = Boolean(conv);
+    $("convhead").hidden = !conv;
+    if (conv) {
+      $("convName").textContent = conv.name;
+      $("convSub").textContent = conv.private ? "Privat · bare de som er lagt til" : "Åpen for alle på turen";
+      $("convWho").dataset.members = conv.id;
+    } else {
+      $("tripName").textContent = S.trip.name;
+      $("tripSub").textContent = [S.trip.org, S.trip.dates].filter(Boolean).join(" · ") || ("Kode " + S.trip.code);
+    }
 
     $("banner").innerHTML = S.offline
       ? `<div class="offlinebar">Ingen forbindelse — viser sist lagrede program. Meldinger sendes ikke.</div>` : "";
@@ -311,22 +342,47 @@ const UI = (() => {
                           : viewMe();
 
     const slot = $("composerSlot");
-    if (S.tab === "chat" && S.channel && !S.offline) {
-      const ch = S.trip.channels.find(c => c.id === S.channel);
+    if (conv && !S.offline) {
       slot.innerHTML = `<form class="composer" id="composer">
-        <input id="msgInput" placeholder="Melding til ${esc(ch ? ch.name : "chatten")}…" autocomplete="off" enterkeyhint="send" maxlength="2000">
+        <input id="msgInput" placeholder="Melding til ${esc(conv.name)}…" autocomplete="off" enterkeyhint="send" maxlength="2000">
         <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
       </form>`;
       $("composer").addEventListener("submit", onSend);
       const sc = $("screen"); sc.scrollTop = sc.scrollHeight;
     } else slot.innerHTML = "";
 
+    // Fanerada er i veien når du skriver i en samtale.
+    $("tabbar").hidden = Boolean(conv);
     $("tabbar").innerHTML = [
       ["program","Program",ICON.cal], ["chat","Chat",ICON.chat], ["meg","Meg",ICON.me]
     ].map(([id,label,ic]) =>
       `<button role="tab" aria-selected="${S.tab === id}" data-tab="${id}">${ic}<span>${label}</span></button>`
     ).join("");
   }
+
+  /* ───────────────── åpne og lukke en samtale ───────────────── */
+  async function openChat(channelId, fromHistory) {
+    S.openChat = channelId;
+    S.loadingChat = true;
+    Api.setLastChannel(S.trip.id, channelId);
+    render();
+    if (!fromHistory) history.pushState({ chat: channelId }, "");
+    try { await Api.loadMessages(S.trip.id, channelId); }
+    catch { toast("Klarte ikke hente meldingene."); }
+    S.loadingChat = false;
+    render();
+  }
+
+  function closeChat(fromHistory) {
+    if (!S.openChat) return false;
+    S.openChat = null;
+    render();
+    if (!fromHistory && history.state && history.state.chat) history.back();
+    return true;
+  }
+
+  window.addEventListener("popstate", () => { if (S.openChat) closeChat(true); });
+
 
   /* ───────────────── send melding ───────────────── */
   async function onSend(e) {
@@ -337,7 +393,7 @@ const UI = (() => {
     inp.value = "";
     const action = Parse.analyse(S.trip, txt);
     try {
-      await Api.sendMessage(S.trip.id, S.channel, txt, action);
+      await Api.sendMessage(S.trip.id, S.openChat, txt, action);
       render();
     } catch (err) {
       inp.value = txt;
@@ -524,10 +580,10 @@ const UI = (() => {
       btn.disabled = true; btn.textContent = "Oppretter…";
       try {
         const id = await Api.addChannel(S.trip.id, name, $("cSub").value.trim(), isPrivate, ids);
-        S.channel = id; Api.setLastChannel(S.trip.id, id);
+        Api.setLastChannel(S.trip.id, id);
         closeSheet();
         await openTrip(S.trip.id);
-        S.tab = "chat"; render(); loadChat();
+        S.tab = "chat"; await openChat(id);
       } catch (e2) {
         btn.disabled = false; btn.textContent = "Opprett chat";
         err.textContent = e2.message; err.hidden = false;
@@ -592,9 +648,9 @@ const UI = (() => {
             const me = all.find(p => p.me);
             await Api.removeChannelMember(channelId, me.id);
             closeSheet();
-            S.channel = null;
+            S.openChat = null;
             await openTrip(S.trip.id);
-            S.tab = "chat"; render(); return loadChat();
+            S.tab = "chat"; return render();
           }
           sheetChannelMembers(channelId);
         } catch (e2) { toast(e2.message || "Det gikk ikke."); }
@@ -761,10 +817,11 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],#tripBtn,#meBtn,#resetBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
+    if (t.id === "backBtn") return closeChat();
     if (t.id === "tripBtn") return sheetTrips();
     if (t.id === "meBtn") { S.tab = "meg"; return render(); }
     if (t.hasAttribute("data-edit")) { S.edit = !S.edit; return render(); }
@@ -783,8 +840,8 @@ const UI = (() => {
     }
 
     if (t.dataset.opentrip) { closeSheet(); S.tab = "program"; return openTrip(t.dataset.opentrip).catch(() => toast("Klarte ikke åpne turen.")); }
-    if (t.dataset.tab) { S.tab = t.dataset.tab; render(); if (S.tab === "chat") loadChat(); return; }
-    if (t.dataset.channel) { S.channel = t.dataset.channel; Api.setLastChannel(S.trip.id, S.channel); render(); return loadChat(); }
+    if (t.dataset.tab) { S.tab = t.dataset.tab; S.openChat = null; return render(); }
+    if (t.dataset.openchat) return openChat(t.dataset.openchat);
 
     if (t.dataset.delitem) {
       if (!confirm("Slette dette punktet?")) return;
@@ -799,7 +856,7 @@ const UI = (() => {
       return;
     }
     if (t.dataset.delmsg) {
-      try { await Api.deleteMessage(t.dataset.delmsg, S.channel); render(); }
+      try { await Api.deleteMessage(t.dataset.delmsg, S.openChat); render(); }
       catch { toast("Klarte ikke slette meldingen."); }
       return;
     }
@@ -842,7 +899,11 @@ const UI = (() => {
   });
 
   $("sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") closeSheet(); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!$("sheetBg").hidden) return closeSheet();
+    closeChat();
+  });
 
   $("joinForm").addEventListener("submit", async e => {
     e.preventDefault();
