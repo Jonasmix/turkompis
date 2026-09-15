@@ -428,3 +428,9 @@ label.person span{flex:1;min-width:0}
   border-radius:9px;background:var(--amber);color:#241A05;
   font-family:"Archivo",sans-serif;font-size:10.5px;font-weight:700;line-height:17px;text-align:center;
 }
+
+/* «Ikke nødvendig» ved siden av en oppgave */
+.oppgave{border-bottom:1px solid var(--line-soft)}
+.oppgave:last-child{border-bottom:0}
+.oppgave .listrow{border-bottom:0;padding-bottom:4px}
+.skjulknapp{font-size:12.5px;padding:2px 0 12px;color:var(--ink-3);text-decoration:none;border-bottom:1px dashed var(--line)}

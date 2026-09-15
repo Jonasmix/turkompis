@@ -529,38 +529,59 @@ const UI = (() => {
   /* Ting reiselederen bør ordne. Alt her er noe som gjør at appen ikke
      kan gjøre jobben sin — et sted uten posisjon gir ingen veibeskrivelse,
      en dag uten hotell gjør at «møt på hotellet» ikke kan slås opp. */
-  function oppgaver() {
+  function oppgaver(taMedSkjulte) {
     if (!S.trip || S.trip.role !== "leader") return [];
     const ut = [];
 
     for (const d of S.trip.days) {
-      if (!d.hotel) {
-        ut.push({
-          hva: `${cap(d.label)} mangler hotell`,
-          hvorfor: "«Møt på hotellet» kan ikke slås opp denne dagen",
-          sheet: "hotel", id: d.id
-        });
-      }
+      if (d.hotel) continue;
+      if (d.ignorerHotell && !taMedSkjulte) continue;
+      ut.push({
+        hva: `${cap(d.label)} mangler hotell`,
+        hvorfor: "«Møt på hotellet» kan ikke slås opp denne dagen",
+        sheet: "hotel", slag: "day", id: d.id, skjult: !!d.ignorerHotell
+      });
     }
 
     for (const p of Object.values(S.trip.places)) {
-      if (!p.addr) {
-        ut.push({
-          hva: `${p.name} mangler adresse`,
-          hvorfor: "Ingen veibeskrivelse og ingen værmelding",
-          sheet: "place", id: p.id
-        });
-      } else if (p.lat == null || p.lon == null) {
-        ut.push({
-          hva: `Fant ikke posisjonen til ${p.name}`,
-          hvorfor: "Prøv en mer nøyaktig adresse — gate, postnummer og land",
-          sheet: "place", id: p.id
-        });
-      }
+      const harPosisjon = p.lat != null && p.lon != null;
+      if (p.addr && harPosisjon) continue;
+      if (p.ignorer && !taMedSkjulte) continue;
+      ut.push({
+        hva: p.addr ? `Fant ikke posisjonen til ${p.name}` : `${p.name} mangler adresse`,
+        hvorfor: p.addr
+          ? "Prøv en mer nøyaktig adresse — gate, postnummer og land"
+          : "Ingen veibeskrivelse og ingen værmelding",
+        sheet: "place", slag: "place", id: p.id, skjult: !!p.ignorer
+      });
     }
 
     return ut;
   }
+
+  async function skjulOppgave(slag, id, skjul) {
+    try {
+      await Api.setIgnorer(slag, id, skjul);
+      await openTrip(S.trip.id);
+      S.tab = "meg"; render();
+      toast(skjul ? "Skjult. Du finner den under «Skjulte»." : "Tatt fram igjen.");
+    } catch {
+      toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+    }
+  }
+
+  function sheetSkjulte() {
+    const skjulte = oppgaver(true).filter(o => o.skjult);
+    openSheet(`<h3>Skjulte oppgaver</h3>
+      <p class="muted" style="margin:6px 0 14px">Ting du har krysset av som unødvendige.
+      De teller ikke med i merket på fanen.</p>
+      ${skjulte.length ? `<div class="memberlist">${skjulte.map(o => `<div class="person">
+          <span>${esc(o.hva)}</span>
+          <button class="linkbtn" data-vis="${esc(o.slag)}" data-visid="${esc(o.id)}">ta fram igjen</button>
+        </div>`).join("")}</div>` : `<p class="muted">Ingenting er skjult.</p>`}
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
   function viewMe() {
     const p = Api.getProfile();
     const trip = S.trip;
@@ -578,10 +599,16 @@ const UI = (() => {
         return `<div>
           <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
           <div class="card pad" style="border-left:3px solid var(--amber)">
-            <div class="list">${o.map(x => `<button class="listrow" data-sheet="${x.sheet}" data-place="${esc(x.id)}" data-day="${esc(x.id)}">
-              <div class="grow"><div class="nm">${esc(x.hva)}</div><div class="sub">${esc(x.hvorfor)}</div></div>
-              <span class="chev">${ICON.chev}</span></button>`).join("")}</div>
-          </div></div>`;
+            <div class="list">${o.map(x => `<div class="oppgave">
+              <button class="listrow" data-sheet="${x.sheet}" data-place="${esc(x.id)}" data-day="${esc(x.id)}">
+                <div class="grow"><div class="nm">${esc(x.hva)}</div><div class="sub">${esc(x.hvorfor)}</div></div>
+                <span class="chev">${ICON.chev}</span>
+              </button>
+              <button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>
+            </div>`).join("")}</div>
+          </div>
+          ${oppgaver(true).some(x => x.skjult) ? `<button class="linkbtn" style="margin-top:9px;font-size:13px" data-sheet="skjulte">Se skjulte oppgaver</button>` : ""}
+        </div>`;
       })()}
 
       <div>
@@ -1554,7 +1581,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -1623,6 +1650,8 @@ const UI = (() => {
 
     // ark
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
+    if (t.dataset.skjul) return skjulOppgave(t.dataset.skjul, t.dataset.skjulid, true);
+    if (t.dataset.vis) { closeSheet(); return skjulOppgave(t.dataset.vis, t.dataset.visid, false); }
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
     if (t.dataset.svar) { closeSheet(); return startSvar(t.dataset.svar); }
@@ -1640,6 +1669,7 @@ const UI = (() => {
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "deltakere") return sheetTripMembers();
+    if (t.dataset.sheet === "skjulte") return sheetSkjulte();
     if (t.dataset.sheet === "about") return sheetAbout();
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();
 

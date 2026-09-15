@@ -518,3 +518,14 @@ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 07 — kryss av for at noe ikke trengs
+--  Ikke alle steder skal navigeres til. Skal gruppen kjøres med buss,
+--  er adressen uvesentlig, og da skal ikke appen mase om den.
+-- ═══════════════════════════════════════════════════════════════
+
+alter table public.places add column if not exists ignore_position boolean not null default false;
+alter table public.days   add column if not exists ignore_hotel    boolean not null default false;
+
+notify pgrst, 'reload schema';

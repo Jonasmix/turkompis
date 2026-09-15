@@ -196,6 +196,7 @@ const Api = (() => {
       placeMap[p.id] = {
         id: p.id, name: p.name, addr: p.addr, kind: p.kind, url: p.url || "",
         lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon,
+        ignorer: p.ignore_position === true,
         alias: Array.from(new Set([p.name.toLowerCase(), ...words, ...(p.aliases || [])]))
       };
     }
@@ -208,7 +209,7 @@ const Api = (() => {
       role: member ? member.role : "member",
       places: placeMap,
       days: days.map(d => Object.assign({
-        id: d.id, date: d.date, hotel: d.hotel_place_id,
+        id: d.id, date: d.date, hotel: d.hotel_place_id, ignorerHotell: d.ignore_hotel === true,
         items: (byDay[d.id] || []).sort(rekkefolge).map(i => ({
           id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src,
           sort: (i.sort === undefined || i.sort === null) ? null : i.sort
@@ -429,6 +430,15 @@ const Api = (() => {
     return data.id;
   }
 
+
+  /* Kryss av for at noe ikke trengs — for eksempel adressen til et sted
+     gruppen kjøres til med buss. Skjuler bare oppgaven, sletter ingenting. */
+  async function setIgnorer(hva, id, verdi) {
+    const tabell = hva === "place" ? "places" : "days";
+    const felt = hva === "place" ? "ignore_position" : "ignore_hotel";
+    const { error } = await sb.from(tabell).update({ [felt]: verdi }).eq("id", id);
+    if (error) throw error;
+  }
   async function addDay(tripId, date) {
     const { data, error } = await sb.from("days")
       .insert({ trip_id: tripId, date }).select().single();
@@ -612,7 +622,7 @@ const Api = (() => {
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
-    addPlace, updatePlace, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
+    addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal
   };
 })();
