@@ -81,7 +81,10 @@ const UI = (() => {
       try { return await openTrip(last); }
       catch { /* turen finnes ikke lenger */ }
     }
-    showJoin();
+
+    // Er du alt innlogget, men uten aapen tur, gaar du rett til aa bli med.
+    if (!Api.erAnonym()) return showJoin();
+    visAuth("start");
   }
 
   function bootSetup() {
@@ -103,6 +106,9 @@ const UI = (() => {
 
     // Er du innlogget, men uten turer, ser skjermen ut som forste gang.
     // Si fra at du faktisk er logget inn, saa du ikke tror det feilet.
+    const tilbake = $("joinTilbake");
+    if (tilbake) tilbake.hidden = !(S.fraStart && Api.erAnonym());
+
     const linje = $("joinKonto");
     const epost = Api.minEpost && Api.minEpost();
     if (epost) {
@@ -1604,9 +1610,13 @@ const UI = (() => {
   }
   /* ───────────────── innlogging med e-post ─────────────────
      Egen side, ikke et ark: skjemaet er kort, men tastaturet tar halve
-     skjermen på telefon, og i et ark ble overskriften liggende under
-     draghåndtaket. */
+     skjermen på telefon, og i et ark lå overskriften under draghåndtaket.
+
+     «start» er skjermen man møter først. E-post er hovedveien, fordi det
+     er den eneste identiteten som overlever en ny telefon. Gjest ligger
+     under — den krever ingenting, men bor bare i denne nettleseren. */
   function visAuth(modus) {
+    const start = modus === "start";
     const kobler = modus === "koble";
     const harAlt = kobler && !Api.erAnonym();
 
@@ -1616,9 +1626,14 @@ const UI = (() => {
     $("authScreen").hidden = false;
 
     $("authInner").innerHTML = `
-      <button class="tilbake" id="authTilbake">${ICON.chevL} Tilbake</button>
-      <h1>${harAlt ? "Bytt e-postadresse" : kobler ? "Sikre kontoen" : "Logg inn"}</h1>
-      <p class="lede">${harAlt
+      ${start ? `<div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/><path d="M31 17 20.5 21 17 31.5 27.5 27.5 31 17Z"/></svg>
+        </div>` : `<button class="tilbake" id="authTilbake">${ICON.chevL} Tilbake</button>`}
+
+      <h1>${start ? "TourFlow" : harAlt ? "Bytt e-postadresse" : kobler ? "Sikre kontoen" : "Logg inn"}</h1>
+      <p class="lede">${start
+        ? "Program, beskjeder og veibeskrivelse for klasseturen. Skriv e-posten din, så sender vi en kode — ingen passord å huske."
+        : harAlt
         ? `Du er innlogget som <b>${esc(Api.minEpost() || "")}</b>. Skriv den nye adressen, så sender vi en kode dit.`
         : kobler
         ? "Du beholder turene og rollene dine. Med e-post kan du logge inn på en annen telefon, og mister ikke alt om denne blir borte."
@@ -1631,10 +1646,26 @@ const UI = (() => {
                  autocapitalize="none" spellcheck="false" placeholder="navn@eksempel.no">
         </div>
         <p class="err" id="aFeil" hidden></p>
-        <button class="btn primary big" type="submit" id="aSend">Send kode</button>
-      </form>`;
+        <button class="btn primary big" type="submit" id="aSend">
+          ${start ? "Fortsett med e-post" : "Send kode"}</button>
+      </form>
 
-    setTimeout(() => $("aPost") && $("aPost").focus(), 100);
+      ${start ? `
+        <div class="skille"><span>eller</span></div>
+        <button class="btn" style="width:100%" id="gjestKnapp">Fortsett som gjest</button>
+        <p class="muted" style="margin-top:9px;text-align:center">
+          Som gjest bor kontoen bare i denne nettleseren. Bytter du telefon, er turene borte.</p>
+        <p style="text-align:center;margin-top:22px;font-size:14.5px;color:var(--ink-2)">
+          Er du reiseleder? <button type="button" class="linkbtn" id="gjestOgLag">Lag en ny tur</button>
+        </p>` : ""}`;
+
+    if (!start) setTimeout(() => $("aPost") && $("aPost").focus(), 100);
+
+    const gjest = $("gjestKnapp");
+    if (gjest) gjest.addEventListener("click", () => { S.fraStart = true; showJoin(); });
+
+    const lagTur = $("gjestOgLag");
+    if (lagTur) lagTur.addEventListener("click", () => { S.fraStart = true; showJoin(); sheetNewTrip(); });
 
     $("authForm").addEventListener("submit", async e => {
       e.preventDefault();
@@ -1650,7 +1681,7 @@ const UI = (() => {
         else await Api.sendKode(epost);
         visAuthKode(epost, kobler);
       } catch (e2) {
-        knapp.disabled = false; knapp.textContent = "Send kode";
+        knapp.disabled = false; knapp.textContent = start ? "Fortsett med e-post" : "Send kode";
         feil.textContent = e2.message; feil.hidden = false;
       }
     });
@@ -1746,9 +1777,10 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],#authTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
+    if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
     if (t.id === "authTilbake") {
       // Paa kodesteget betyr tilbake "bruk en annen adresse", ikke ut.
       return $("authInner").querySelector("#kodeForm") ? visAuth(S.trip && !Api.erAnonym() ? "koble" : "logginn") : lukkAuth();

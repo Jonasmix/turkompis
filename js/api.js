@@ -625,6 +625,13 @@ const Api = (() => {
     if (!sb) return null;
     const { data } = await sb.auth.getUser();
     const u = data && data.user;
+    // Logger man inn med e-post, blir man en annen bruker enn gjesten man
+    // var. Uten dette spør appen fortsatt etter den gamle IDen, finner
+    // ingen turer, og sender deg tilbake til skjemaet.
+    if (u && u.id && u.id !== userId) {
+      userId = u.id;
+      cache.messages = {}; cache.reactions = {}; cache.recent = {}; cache.vaer = {}; cache.trip = null;
+    }
     cache.epost = u && u.email ? u.email : null;
     cache.anonym = !!(u && u.is_anonymous);
     return { epost: cache.epost, anonym: cache.anonym };
