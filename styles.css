@@ -81,9 +81,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 .screen>*{min-width:0;flex-shrink:0}
 
 .tabbar{display:flex;flex:none;border-top:1px solid var(--line-soft);background:var(--surface);
-  padding:5px 6px calc(2px + var(--safe-b))}
+  padding:4px 6px max(4px, calc(var(--safe-b) - 14px))}
 .tabbar button{
-  flex:1;background:none;border:0;padding:8px 4px 5px;cursor:pointer;color:var(--ink-3);border-radius:10px;
+  flex:1;background:none;border:0;padding:6px 4px 2px;cursor:pointer;color:var(--ink-3);border-radius:10px;
   font-family:"Archivo",sans-serif;font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px;
 }
 .tabbar button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
