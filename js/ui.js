@@ -125,13 +125,15 @@ const UI = (() => {
     const t = new Date().toTimeString().slice(0, 5);
     const d = trip.days.find(x => x.date === today());
     if (d) {
-      const item = d.items.find(i => i.t > t);
+      const item = d.items.find(i => i.t && i.t > t);
       if (item) return { day: d, item };
       const nd = trip.days.find(x => x.date > today());
-      return nd && nd.items[0] ? { day: nd, item: nd.items[0] } : null;
+      const f = nd && nd.items.find(i => i.t);
+      return f ? { day: nd, item: f } : null;
     }
     const up = trip.days.find(x => x.date >= today());
-    return up && up.items[0] ? { day: up, item: up.items[0] } : null;
+    const forste = up && up.items.find(i => i.t);
+    return forste ? { day: up, item: forste } : null;
   }
 
   function viewProgram() {
@@ -185,7 +187,7 @@ const UI = (() => {
       const p = i.place ? trip.places[i.place] : null;
       const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
       return `<div class="ev ${isNext ? "now" : ""}" ${p ? `data-sheet="place" data-place="${esc(i.place)}" role="button" tabindex="0"` : ""}>
-        <div class="time">${esc(i.t)}${isNext ? "<em>neste</em>" : ""}</div>
+        <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
           <div class="title">${esc(i.title)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
@@ -898,7 +900,7 @@ const UI = (() => {
 
     if (!dager.length) {
       openSheet(`<h3>Fant ikke noe program</h3>
-        <p class="muted" style="margin:10px 0">Filen inneholdt ingen datoer med klokkeslett.
+        <p class="muted" style="margin:10px 0">Filen inneholdt ingen datoer.
         Er det en skannet PDF som bare er bilder, klarer ikke appen å lese den.</p>
         ${advarsler.length ? `<div class="card pad" style="padding-block:12px"><div class="eyebrow">Merknader</div>
           <ul style="margin:8px 0 0;padding-left:18px;font-size:14px;color:var(--ink-2)">
@@ -907,19 +909,38 @@ const UI = (() => {
       return;
     }
 
+    let utenTid = 0;
     const bolker = dager.map((d, i) => {
       const dag = Api.fmtDay(d.dato);
-      const punkter = (d.punkter || []).map((p, j) => `
-        <label class="person">
+
+      const punkter = (d.punkter || []).map((p, j) => {
+        if (!p.tid) utenTid++;
+        return `<label class="person" style="align-items:flex-start">
           <input type="checkbox" data-punkt="${i}-${j}" checked>
-          <span><b class="mono">${esc(p.tid || "??:??")}</b> ${esc(p.tittel)}
+          <span>
+            ${p.tid
+              ? `<b class="mono">${esc(p.tid)}</b> ${esc(p.tittel)}`
+              : `${esc(p.tittel)}<br><input type="time" data-tid="${i}-${j}" class="tidfelt"
+                   aria-label="Klokkeslett for ${esc(p.tittel)}">
+                 <small style="color:var(--ink-3)">sto ikke i filen</small>`}
             ${p.stedNavn ? `<br><small style="color:var(--ink-3)">${esc(p.stedNavn)}${p.stedAdresse ? " · " + esc(p.stedAdresse) : " · mangler adresse"}</small>` : ""}
           </span>
-        </label>`).join("");
+        </label>`;
+      }).join("");
+
+      // Hotell uten adresse blir ikke navigerbart — spør om den her.
+      const hotellFelt = d.hotellNavn && !d.hotellAdresse
+        ? `<div class="field" style="margin:6px 0 10px">
+             <input data-hoteladr="${i}" placeholder="Adresse til ${esc(d.hotellNavn)}">
+             <small style="color:var(--ink-3);display:block;margin-top:5px">
+               ${d.hotellNettside ? "Filen oppga bare en nettlenke. " : "Sto ikke i filen. "}Uten adresse virker ikke kartet.</small>
+           </div>`
+        : "";
 
       return `<div style="margin-bottom:18px">
         <div class="eyebrow" style="margin-bottom:6px">${esc(dag.label)}</div>
-        ${d.hotellNavn ? `<p class="muted" style="margin:0 0 7px">Hotell: ${esc(d.hotellNavn)}${d.hotellAdresse ? "" : " (mangler adresse)"}</p>` : ""}
+        ${d.hotellNavn ? `<p class="muted" style="margin:0 0 5px">Hotell: ${esc(d.hotellNavn)}</p>` : ""}
+        ${hotellFelt}
         <div class="memberlist">${punkter || '<p class="muted" style="padding:10px">Ingen punkter.</p>'}</div>
       </div>`;
     }).join("");
@@ -928,8 +949,11 @@ const UI = (() => {
 
     openSheet(`<h3>Forslag fra filen</h3>
       <p class="muted" style="margin:6px 0 14px">
-        ${dager.length} dager og ${antall} punkter. Hak av det som skal inn — sjekk særlig
-        klokkeslettene.</p>
+        ${dager.length} dager og ${antall} punkter. Hak av det som skal inn.</p>
+      ${utenTid ? `<div class="card pad" style="padding-block:12px;margin-bottom:14px;border-left:3px solid var(--blue)">
+        <div class="eyebrow" style="color:var(--blue-ink)">${utenTid} punkter uten klokkeslett</div>
+        <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">Filen oppga ingen tid for disse.
+        Fyll inn hvis du vet den — ellers legges de inn uten, og vises nederst på dagen.</p></div>` : ""}
       ${advarsler.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-left:3px solid var(--amber)">
         <div class="eyebrow" style="color:var(--amber)">Appen er usikker på</div>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
@@ -944,46 +968,53 @@ const UI = (() => {
 
   async function leggInnForslag(dager) {
     const btn = $("impSubmit"), err = $("impErr");
-    btn.disabled = true; btn.textContent = "Legger inn…";
-      // «hotellet» og «lobbyen» er ikke steder — appen vet allerede hvilket
-      // hotell dagen har. Slike navn droppes, ellers fyller de opp stedslista.
-      const GENERISK = /^(hotellet|hotell|lobbyen|lobby|resepsjonen|rommet|bussen|egen hånd|ukjent)$/i;
+    // «hotellet» og «lobbyen» er ikke steder — appen vet allerede hvilket
+    // hotell dagen har. Slike navn droppes, ellers fyller de opp stedslista.
+    const GENERISK = /^(hotellet|hotell|lobbyen|lobby|resepsjonen|rommet|bussen|egen hånd|ukjent)$/i;
 
+    btn.disabled = true; btn.textContent = "Legger inn…";
     try {
       // Gjenbruk steder som allerede finnes, så vi ikke får duplikater.
       const kjente = {};
       for (const p of Object.values(S.trip.places)) kjente[p.name.toLowerCase()] = p.id;
 
-      const stedId = async (navn, adresse, type) => {
+      const stedId = async (navn, adresse, type, url) => {
         if (!navn || GENERISK.test(navn.trim())) return null;
         const n = navn.toLowerCase();
         if (kjente[n]) return kjente[n];
-        const id = await Api.addPlace(S.trip.id, { name: navn, addr: adresse || "", kind: type || "Sted" });
+        const id = await Api.addPlace(S.trip.id, {
+          name: navn, addr: adresse || "", kind: type || "Sted", url: url || ""
+        });
         kjente[n] = id;
         return id;
       };
 
       for (let i = 0; i < dager.length; i++) {
         const d = dager[i];
-        const valgte = (d.punkter || []).filter((_, j) => {
-          const boks = document.querySelector(`[data-punkt="${i}-${j}"]`);
-          return boks && boks.checked;
-        });
+        const valgte = (d.punkter || [])
+          .map((p, j) => ({ p, j }))
+          .filter(({ j }) => {
+            const boks = document.querySelector(`[data-punkt="${i}-${j}"]`);
+            return boks && boks.checked;
+          });
         if (!valgte.length && !d.hotellNavn) continue;
 
-        // Finnes dagen fra før, bruk den i stedet for å lage en ny.
         let dagId = (S.trip.days.find(x => x.date === d.dato) || {}).id;
         if (!dagId) dagId = await Api.addDay(S.trip.id, d.dato);
 
         if (d.hotellNavn) {
-          const hid = await stedId(d.hotellNavn, d.hotellAdresse, "Hotell");
+          const skrevet = document.querySelector(`[data-hoteladr="${i}"]`);
+          const adr = d.hotellAdresse || (skrevet ? skrevet.value.trim() : "");
+          const hid = await stedId(d.hotellNavn, adr, "Hotell", d.hotellNettside);
           if (hid) await Api.setHotel(dagId, hid);
         }
 
-        for (const p of valgte) {
+        for (const { p, j } of valgte) {
+          const tidFelt = document.querySelector(`[data-tid="${i}-${j}"]`);
+          const tid = p.tid || (tidFelt ? tidFelt.value : "");
           const sid = await stedId(p.stedNavn, p.stedAdresse, "Sted");
           await Api.addItem(S.trip.id, dagId, {
-            t: /^\d{2}:\d{2}$/.test(p.tid) ? p.tid : "09:00",
+            t: /^\d{2}:\d{2}$/.test(tid) ? tid : null,
             title: p.tittel || "Programpunkt",
             placeId: sid,
             note: p.notat || ""
@@ -1001,6 +1032,7 @@ const UI = (() => {
       err.hidden = false;
     }
   }
+
 
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>

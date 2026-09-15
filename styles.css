@@ -290,3 +290,7 @@ label.person span{flex:1;min-width:0}
   font-family:"Archivo",sans-serif;font-weight:600;font-size:13px;border:1px solid var(--line);
   background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 12px;margin-right:11px;cursor:pointer;
 }
+
+/* Klokkeslett som må fylles inn i importforslaget */
+.tidfelt{border:1px solid var(--line);background:var(--surface);border-radius:8px;
+  padding:6px 9px;font-size:15px;margin:5px 8px 2px 0;font-family:"IBM Plex Mono",monospace}

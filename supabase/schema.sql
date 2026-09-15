@@ -383,3 +383,14 @@ grant execute on function public.add_channel_member(uuid, uuid) to authenticated
 
 -- Chatter som fantes før denne utvidelsen er åpne for hele turen.
 update public.channels set private = false where private is null;
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 03 — programpunkter uten klokkeslett
+--  Ekte turhefter har punkter som «frokost på hotellet» uten tid.
+--  Kravet om klokkeslett tvang modellen til å finne på tider.
+-- ═══════════════════════════════════════════════════════════════
+
+alter table public.items alter column t drop not null;
+
+-- Steder kan ha en nettside når heftet oppgir lenke i stedet for adresse.
+alter table public.places add column if not exists url text not null default '';

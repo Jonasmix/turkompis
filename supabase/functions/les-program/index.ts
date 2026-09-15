@@ -40,11 +40,12 @@ const SKJEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["dato", "hotellNavn", "hotellAdresse", "punkter"],
+        required: ["dato", "hotellNavn", "hotellAdresse", "hotellNettside", "punkter"],
         properties: {
           dato: { type: "string", description: "ISO-dato, YYYY-MM-DD. Tom streng hvis året ikke går fram." },
           hotellNavn: { type: "string", description: "Hotellet gruppen bor på denne natten. Tom streng hvis ukjent." },
-          hotellAdresse: { type: "string", description: "Full adresse. Tom streng hvis den ikke står i dokumentet." },
+          hotellAdresse: { type: "string", description: "Full gateadresse. Tom streng hvis den ikke står i dokumentet." },
+          hotellNettside: { type: "string", description: "Nettadresse til hotellet hvis heftet bare oppgir en lenke. Tom streng ellers." },
           punkter: {
             type: "array",
             items: {
@@ -52,7 +53,7 @@ const SKJEMA = {
               additionalProperties: false,
               required: ["tid", "tittel", "stedNavn", "stedAdresse", "notat"],
               properties: {
-                tid: { type: "string", description: "HH:MM i 24-timers format." },
+                tid: { type: "string", description: "HH:MM i 24-timers format. TOM STRENG hvis dokumentet ikke oppgir et klokkeslett." },
                 tittel: { type: "string", description: "Hva som skjer, kort." },
                 stedNavn: { type: "string", description: "Stedet det skjer. Tom streng hvis ikke oppgitt." },
                 stedAdresse: { type: "string", description: "Full adresse. Tom streng hvis den ikke står i dokumentet." },
@@ -73,16 +74,42 @@ const SKJEMA = {
 
 const INSTRUKS = `Du leser vedlegg til en norsk klassetur og trekker ut reiseprogrammet.
 
-Regler:
-- Ta med alt som har et klokkeslett: oppmøte, transport, omvisninger, måltider, innetid.
-- «tid» skal være HH:MM. Står det «kl 9», skriv 09:00. Står det et tidsrom, bruk starttidspunktet.
-- «dato» skal være YYYY-MM-DD. Året står ofte bare i overskriften — bruk det på alle dagene.
-- ALDRI finn på en adresse. Står ikke adressen i dokumentet, la feltet være tomt og skriv
-  en linje i «usikkert» om at stedet mangler adresse.
-- Hotellet gjelder natten etter den dagen. Bytter gruppen hotell underveis, må hver dag få
-  riktig hotell.
-- Er noe tvetydig — utydelig skann, motstridende klokkeslett, dato uten år — ta det med i
-  «usikkert» i stedet for å gjette.
+DEN VIKTIGSTE REGELEN: du skal ALDRI finne på noe. Dette er et program elever
+skal møte opp etter. Et oppdiktet klokkeslett sender noen til feil sted til feil tid.
+Står det ikke i dokumentet, skal feltet være tomt.
+
+Klokkeslett:
+- Bruk BARE klokkeslett som faktisk står i dokumentet. Skriv dem som HH:MM.
+  «kl 9» blir 09:00, «kl. 14» blir 14:00, «12.30-14.00» blir 12:30.
+- Står det ikke noe klokkeslett — for eksempel «Frokost på hotellet» eller
+  «Fritid i Paris» — la «tid» være TOM STRENG. Ikke gjett ut fra hva som er vanlig,
+  ikke regn deg fram fra andre punkter, ikke bruk kunnskap om rutetider.
+- Et punkt uten klokkeslett skal likevel med. Rekkefølgen i dokumentet er nok.
+
+Steder og adresser:
+- Bruk bare adresser som står i dokumentet. Ellers tom streng.
+- Oppgir dokumentet en nettlenke til hotellet i stedet for adresse, legg lenken i
+  «hotellNettside» og la «hotellAdresse» være tom.
+- Bruk samme skrivemåte for samme sted hele veien. Ikke lag både «Oslo lufthavn» og
+  «Oslo lufthavn terminal 2».
+- Generiske ord er ikke steder. Står det «frokost på hotellet», la «stedNavn» være tom —
+  appen vet selv hvilket hotell dagen har.
+
+Datoer:
+- «dato» skal være YYYY-MM-DD. Året står ofte bare i tittelen eller på forsiden.
+- Går året ikke fram noe sted, la «dato» være tom og skriv det i «usikkert».
+
+Hotell:
+- Hotellet gjelder natten etter den dagen. Bytter gruppen hotell underveis, skal hver
+  dag ha riktig hotell. Siste dagen har som regel ikke hotell.
+
+«usikkert»:
+- Skriv én kort setning per ting du er i tvil om: manglende adresser, to alternative
+  avganger, utydelig skann, motstridende opplysninger.
+- Ikke skriv at du har estimert noe — du skal ikke estimere i det hele tatt.
+
+Dokumentet kan inneholde mye som ikke er program: historiestoff, pakkeliste,
+telefonnumre, bilder. Hopp over alt slikt.
 
 Svar bare ved å kalle verktøyet.`;
 

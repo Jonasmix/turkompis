@@ -155,7 +155,7 @@ const Api = (() => {
     for (const p of places) {
       const words = p.name.toLowerCase().split(/[\s,()]+/).filter(w => w.length > 3);
       placeMap[p.id] = {
-        id: p.id, name: p.name, addr: p.addr, kind: p.kind,
+        id: p.id, name: p.name, addr: p.addr, kind: p.kind, url: p.url || "",
         alias: Array.from(new Set([p.name.toLowerCase(), ...words, ...(p.aliases || [])]))
       };
     }
@@ -168,8 +168,8 @@ const Api = (() => {
       places: placeMap,
       days: days.map(d => Object.assign({
         id: d.id, date: d.date, hotel: d.hotel_place_id,
-        items: (byDay[d.id] || []).sort((a, b) => a.t.localeCompare(b.t)).map(i => ({
-          id: i.id, t: i.t, title: i.title, place: i.place_id, note: i.note, src: i.src
+        items: (byDay[d.id] || []).sort((a, b) => (a.t || "99:99").localeCompare(b.t || "99:99")).map(i => ({
+          id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src
         }))
       }, fmtDay(d.date))),
       channels: channels.map(c => ({ id: c.id, name: c.name, sub: c.sub, private: c.private === true }))
@@ -316,9 +316,9 @@ const Api = (() => {
   }
 
   /* ───────── program (kun reiseleder) ───────── */
-  async function addPlace(tripId, { name, addr, kind }) {
+  async function addPlace(tripId, { name, addr, kind, url }) {
     const { data, error } = await sb.from("places")
-      .insert({ trip_id: tripId, name, addr: addr || "", kind: kind || "Sted" }).select().single();
+      .insert({ trip_id: tripId, name, addr: addr || "", kind: kind || "Sted", url: url || "" }).select().single();
     if (error) throw error;
     return data.id;
   }
@@ -337,7 +337,7 @@ const Api = (() => {
 
   async function addItem(tripId, dayId, { t, title, placeId, note }) {
     const { data, error } = await sb.from("items").insert({
-      trip_id: tripId, day_id: dayId, t, title,
+      trip_id: tripId, day_id: dayId, t: t || null, title,
       place_id: placeId || null, note: note || ""
     }).select().single();
     if (error) throw error;
