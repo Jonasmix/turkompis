@@ -82,8 +82,16 @@ const UI = (() => {
       catch { /* turen finnes ikke lenger */ }
     }
 
-    // Er du alt innlogget, men uten aapen tur, gaar du rett til aa bli med.
-    if (!Api.erAnonym()) return showJoin();
+    // Innlogget uten lagret «siste tur» på denne telefonen: spør basen om
+    // du er med på noe, i stedet for å anta at du ikke er det.
+    if (!Api.erAnonym()) {
+      try {
+        const turer = await Api.myTrips();
+        S.trips = turer;
+        if (turer.length) return await openTrip(turer[0].id);
+      } catch { /* uten nett får vi svare med skjemaet */ }
+      return showJoin();
+    }
     visAuth("start");
   }
 
@@ -112,7 +120,7 @@ const UI = (() => {
     const linje = $("joinKonto");
     const epost = Api.minEpost && Api.minEpost();
     if (epost) {
-      linje.innerHTML = `Innlogget som <b>${esc(epost)}</b>. Du er ikke med på noen tur ennå 2014 skriv turkoden under.`;
+      linje.innerHTML = `Innlogget som <b>${esc(epost)}</b>. Du er ikke med på noen tur ennå — skriv turkoden under.`;
       linje.hidden = false;
     } else linje.hidden = true;
   }
