@@ -1715,8 +1715,9 @@ const UI = (() => {
     $("authInner").innerHTML = `
       <button class="tilbake" id="authTilbake">${ICON.chevL} Bruk en annen adresse</button>
       <h1>Sjekk e-posten</h1>
-      <p class="lede">Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.
-        Finner du den ikke, se i søppelpost.</p>
+      <p class="lede">Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.</p>
+      <p class="soppelpost"><b>Finner du den ikke?</b> Se i søppelpost — automatiske e-poster
+        havner ofte der. I Gmail, sjekk også fanen «Kampanjer».</p>
 
       <form id="kodeForm" novalidate>
         <div class="field">
