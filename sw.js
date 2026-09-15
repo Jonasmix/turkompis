@@ -1,13 +1,15 @@
 /* sw.js — gjør appen tilgjengelig uten nett.
    Bump CACHE når filene endres, ellers får folk den gamle versjonen. */
 
-const CACHE = "turkompis-v1";
+const CACHE = "turkompis-v2";
 const SHELL = [
   "./",
   "index.html",
   "styles.css",
-  "js/data.js",
-  "js/store.js",
+  "vendor/supabase.js",
+  "js/config.js",
+  "js/templates.js",
+  "js/api.js",
   "js/parse.js",
   "js/ui.js",
   "manifest.webmanifest",
@@ -36,17 +38,18 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
 
-  // Sidenavigasjon: prøv nett først, fall tilbake til lagret skall offline.
+  // Sidenavigasjon: nett først, lagret skall som reserve.
   if (req.mode === "navigate") {
     e.respondWith(
-      fetch(req).catch(() => caches.match("index.html", { ignoreSearch: true }))
-                .then(r => r || caches.match("./"))
+      fetch(req)
+        .catch(() => caches.match("index.html", { ignoreSearch: true }))
+        .then(r => r || caches.match("./"))
     );
     return;
   }
 
-  const sameOrigin = new URL(req.url).origin === self.location.origin;
-  if (!sameOrigin) return; // skrifter o.l. håndteres av nettleseren
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;  // API og skrifter går rett på nett
 
   e.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {

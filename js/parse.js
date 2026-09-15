@@ -10,6 +10,7 @@ const Parse = (() => {
   /* Hvilken dag tar vi utgangspunkt i: dagens dato hvis turen pågår,
      ellers første dag i programmet. */
   function baseDate(trip) {
+    if (!trip || !trip.days || !trip.days.length) return null;
     const today = new Date().toISOString().slice(0, 10);
     const hit = trip.days.find(d => d.date === today);
     if (hit) return hit.date;
@@ -66,7 +67,9 @@ const Parse = (() => {
       return { place: best, why: `Stedsnavnet «${trip.places[best].name}»` };
     }
     if (best || hotelWords.test(low)) {
-      if (day) return { place: day.hotel, why: "«hotellet» tolket som hotellet dere bor på" };
+      if (day && day.hotel && trip.places[day.hotel]) {
+        return { place: day.hotel, why: "«hotellet» tolket som hotellet dere bor på" };
+      }
       if (best) return { place: best, why: `Stedsnavnet «${trip.places[best].name}»` };
     }
     return null;
@@ -81,9 +84,10 @@ const Parse = (() => {
   }
 
   function analyse(trip, text) {
+    const base = baseDate(trip);
+    if (!base) return null;               // turen har ikke program ennå
     const low = " " + String(text).toLowerCase() + " ";
     const time = findTime(low);
-    const base = baseDate(trip);
     const date = findDate(trip, low, base);
 
     const hit = findPlace(trip, low, date) || fromProgram(trip, date, time);
