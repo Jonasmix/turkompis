@@ -40,6 +40,7 @@ const UI = (() => {
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
   };
 
+  const cap = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
   const prikker = () => '<span class="prikker"><i></i><i></i><i></i></span>';
   const venter = tekst => `<div class="venter">${prikker()} ${esc(tekst)}</div>`;
 
@@ -524,6 +525,42 @@ const UI = (() => {
   }
 
   /* ───────────────── meg ───────────────── */
+
+  /* Ting reiselederen bør ordne. Alt her er noe som gjør at appen ikke
+     kan gjøre jobben sin — et sted uten posisjon gir ingen veibeskrivelse,
+     en dag uten hotell gjør at «møt på hotellet» ikke kan slås opp. */
+  function oppgaver() {
+    if (!S.trip || S.trip.role !== "leader") return [];
+    const ut = [];
+
+    for (const d of S.trip.days) {
+      if (!d.hotel) {
+        ut.push({
+          hva: `${cap(d.label)} mangler hotell`,
+          hvorfor: "«Møt på hotellet» kan ikke slås opp denne dagen",
+          sheet: "hotel", id: d.id
+        });
+      }
+    }
+
+    for (const p of Object.values(S.trip.places)) {
+      if (!p.addr) {
+        ut.push({
+          hva: `${p.name} mangler adresse`,
+          hvorfor: "Ingen veibeskrivelse og ingen værmelding",
+          sheet: "place", id: p.id
+        });
+      } else if (p.lat == null || p.lon == null) {
+        ut.push({
+          hva: `Fant ikke posisjonen til ${p.name}`,
+          hvorfor: "Prøv en mer nøyaktig adresse — gate, postnummer og land",
+          sheet: "place", id: p.id
+        });
+      }
+    }
+
+    return ut;
+  }
   function viewMe() {
     const p = Api.getProfile();
     const trip = S.trip;
@@ -535,6 +572,18 @@ const UI = (() => {
       : `<p class="muted" style="padding:12px 0">Henter turene dine…</p>`;
 
     return `
+      ${(() => {
+        const o = oppgaver();
+        if (!o.length) return "";
+        return `<div>
+          <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
+          <div class="card pad" style="border-left:3px solid var(--amber)">
+            <div class="list">${o.map(x => `<button class="listrow" data-sheet="${x.sheet}" data-place="${esc(x.id)}" data-day="${esc(x.id)}">
+              <div class="grow"><div class="nm">${esc(x.hva)}</div><div class="sub">${esc(x.hvorfor)}</div></div>
+              <span class="chev">${ICON.chev}</span></button>`).join("")}</div>
+          </div></div>`;
+      })()}
+
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Deg</div>
         <div class="card pad" style="padding-block:14px">
@@ -636,10 +685,13 @@ const UI = (() => {
 
     // Fanerada er i veien når du skriver i en samtale.
     $("tabbar").hidden = Boolean(conv);
+    const antall = oppgaver().length;
     $("tabbar").innerHTML = [
       ["program","Program",ICON.cal], ["chat","Chat",ICON.chat], ["meg","Meg",ICON.me]
     ].map(([id,label,ic]) =>
-      `<button role="tab" aria-selected="${S.tab === id}" data-tab="${id}">${ic}<span>${label}</span></button>`
+      `<button role="tab" aria-selected="${S.tab === id}" data-tab="${id}">
+        <span class="ikon">${ic}${id === "meg" && antall ? `<span class="varsel">${antall}</span>` : ""}</span>
+        <span>${label}</span></button>`
     ).join("");
   }
 

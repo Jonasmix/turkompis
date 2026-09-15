@@ -195,6 +195,7 @@ const Api = (() => {
       const words = p.name.toLowerCase().split(/[\s,()]+/).filter(w => w.length > 3);
       placeMap[p.id] = {
         id: p.id, name: p.name, addr: p.addr, kind: p.kind, url: p.url || "",
+        lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon,
         alias: Array.from(new Set([p.name.toLowerCase(), ...words, ...(p.aliases || [])]))
       };
     }
