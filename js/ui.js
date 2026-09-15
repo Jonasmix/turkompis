@@ -40,6 +40,9 @@ const UI = (() => {
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
   };
 
+  const prikker = () => '<span class="prikker"><i></i><i></i><i></i></span>';
+  const venter = tekst => `<div class="venter">${prikker()} ${esc(tekst)}</div>`;
+
   function toast(text) {
     const t = $("toast");
     t.textContent = text; t.hidden = false;
@@ -51,7 +54,7 @@ const UI = (() => {
   async function boot() {
     if (!CONFIG.ready) return bootSetup();
 
-    $("bootMsg").textContent = "Kobler til…";
+    $("bootMsg").innerHTML = venter("Kobler til");
     const res = await Api.init();
 
     if (!res.ok) {
@@ -93,7 +96,7 @@ const UI = (() => {
   }
 
   async function openTrip(tripId) {
-    $("bootMsg").textContent = "Henter turen…";
+    $("bootMsg").innerHTML = venter("Henter turen");
     const trip = await Api.loadTrip(tripId);
     if (!trip) throw new Error("Fant ikke turen");
 
@@ -192,8 +195,7 @@ const UI = (() => {
           <div class="title">${esc(i.title)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
           ${S.edit ? `<div class="redigerrad">
-            <button class="minibtn" data-flytt="${esc(i.id)}" data-vei="opp" ${k === 0 ? "disabled" : ""} aria-label="Flytt opp">↑</button>
-            <button class="minibtn" data-flytt="${esc(i.id)}" data-vei="ned" ${k === d.items.length - 1 ? "disabled" : ""} aria-label="Flytt ned">↓</button>
+            <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
             <button class="minibtn fare" data-delitem="${esc(i.id)}">Slett</button>
           </div>` : ""}
         </div>
@@ -218,24 +220,70 @@ const UI = (() => {
       </div>` : ""}`;
   }
 
+  /* Dra et programpunkt til en ny plass, slik man flytter i en spilleliste.
+     Radene bytter plass i DOM-en mens du drar, og rekkefølgen lagres når du
+     slipper. Uten touch-action:none ville telefonen skrollet i stedet. */
+  function settOppDraing() {
+    const tl = $("screen").querySelector(".tl");
+    if (!tl || !S.edit) return;
 
-  /* Bytt plass på to punkter, og skriv rekkefølgen til hele dagen på nytt.
-     Da spiller det ingen rolle om punktene manglet rekkefølge fra før. */
-  async function flyttPunkt(itemId, vei) {
-    const dag = S.trip.days.find(d => d.items.some(i => i.id === itemId));
+    let rad = null, startY = 0;
+
+    tl.addEventListener("pointerdown", e => {
+      const hank = e.target.closest("[data-drag]");
+      if (!hank) return;
+      rad = hank.closest(".ev");
+      if (!rad) return;
+      e.preventDefault();
+      startY = e.clientY;
+      rad.classList.add("drar");
+      try { hank.setPointerCapture(e.pointerId); } catch {}
+    });
+
+    tl.addEventListener("pointermove", e => {
+      if (!rad) return;
+      e.preventDefault();
+      const dy = e.clientY - startY;
+      rad.style.transform = `translateY(${dy}px)`;
+
+      // Bare naboen i den retningen du drar vurderes, og først når raden
+      // har passert midten av den. Ellers bytter raden plass med seg selv.
+      const rr = rad.getBoundingClientRect();
+      const midt = rr.top + rr.height / 2;
+      const nabo = dy > 0 ? rad.nextElementSibling : dy < 0 ? rad.previousElementSibling : null;
+      if (!nabo || !nabo.classList.contains("ev")) return;
+
+      const r = nabo.getBoundingClientRect();
+      const passert = dy > 0 ? midt > r.top + r.height / 2 : midt < r.top + r.height / 2;
+      if (!passert) return;
+
+      if (dy > 0) nabo.after(rad); else nabo.before(rad);
+      startY = e.clientY;              // nytt utgangspunkt, ellers hopper raden
+      rad.style.transform = "";
+    }, { passive: false });
+
+    async function slipp() {
+      if (!rad) return;
+      rad.style.transform = "";
+      rad.classList.remove("drar");
+      rad = null;
+      const ids = [...tl.querySelectorAll(".ev")].map(r => r.dataset.item);
+      await lagreRekkefolge(ids);
+    }
+    tl.addEventListener("pointerup", slipp);
+    tl.addEventListener("pointercancel", slipp);
+  }
+
+  async function lagreRekkefolge(ids) {
+    const dag = S.trip.days.find(d => d.items.some(i => ids.includes(i.id)));
     if (!dag) return;
-    const liste = dag.items.slice();
-    const fra = liste.findIndex(i => i.id === itemId);
-    const til = vei === "opp" ? fra - 1 : fra + 1;
-    if (til < 0 || til >= liste.length) return;
+    const gammel = dag.items.map(i => i.id).join();
+    if (gammel === ids.join()) return;          // ingenting flyttet seg
 
-    liste.splice(til, 0, liste.splice(fra, 1)[0]);
-    dag.items = liste;          // vis flyttingen med én gang
-    render();
-
+    dag.items = ids.map(id => dag.items.find(i => i.id === id)).filter(Boolean);
     try {
-      for (let n = 0; n < liste.length; n++) {
-        await Api.updateItem(liste[n].id, { sort: (n + 1) * 10 });
+      for (let n = 0; n < dag.items.length; n++) {
+        await Api.updateItem(dag.items[n].id, { sort: (n + 1) * 10 });
       }
       await openTrip(S.trip.id);
     } catch {
@@ -243,6 +291,7 @@ const UI = (() => {
       await openTrip(S.trip.id);
     }
   }
+
   /* ───────────────── chat ───────────────── */
   function actionCard(a) {
     const p = S.trip.places[a.place];
@@ -287,7 +336,7 @@ const UI = (() => {
   function viewConversation() {
     const msgs = Api.messages(S.openChat);
     if (!msgs.length && S.loadingChat) {
-      return `<p class="muted" style="text-align:center;padding:30px 0">Henter meldinger…</p>`;
+      return venter("Henter meldinger");
     }
     const body = msgs.length ? msgs.map(m => `<div class="msg ${m.mine ? "me" : ""}">
         ${m.mine ? "" : `<div class="who">${esc(m.who)}${m.role ? ` <b>· ${esc(m.role)}</b>` : ""}</div>`}
@@ -388,6 +437,8 @@ const UI = (() => {
       const sc = $("screen"); sc.scrollTop = sc.scrollHeight;
     } else slot.innerHTML = "";
 
+    settOppDraing();
+
     // Dagsvelgeren skal stå der du forlot den, ikke hoppe til mandag.
     const chipsEtter = $("screen").querySelector(".chips");
     if (chipsEtter) {
@@ -467,34 +518,49 @@ const UI = (() => {
   /* Dra arket nedover for å lukke det, slik man gjør i apper ellers.
      Draingen starter bare når arket er skrollet helt til toppen, og aldri
      oppå en knapp eller et skrivefelt. */
+  /* Dra arket nedover for å lukke det.
+     Skjemafelt og knapper skal fortsatt kunne trykkes, men alt annet —
+     overskrifter, tekst, tomme flater — er gyldig å ta tak i. Tidligere
+     utelot jeg også <label>, og siden nesten alt innhold i redigeringsark
+     ligger inne i en label, var det i praksis umulig å dra dem bort. */
   (function dragToClose() {
     const s = $("sheet");
-    let startY = 0, dy = 0, dragging = false;
+    let startY = 0, dy = 0, dragging = false, kandidat = false;
 
     s.addEventListener("pointerdown", e => {
-      if (e.target.closest("input, textarea, select, button, a, label")) return;
+      if (e.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
       if (s.scrollTop > 0) return;
-      dragging = true; startY = e.clientY; dy = 0;
-      s.classList.add("dragging");
+      kandidat = true; dragging = false;
+      startY = e.clientY; dy = 0;
     });
 
     s.addEventListener("pointermove", e => {
-      if (!dragging) return;
-      dy = Math.max(0, e.clientY - startY);
-      if (dy > 4) e.preventDefault();
+      if (!kandidat) return;
+      const d = e.clientY - startY;
+
+      // Vent til bevegelsen tydelig går nedover før vi tar over, ellers
+      // stjeler vi skrollingen i lange ark.
+      if (!dragging) {
+        if (d < 8) { if (d < -8) kandidat = false; return; }
+        dragging = true;
+        s.classList.add("dragging");
+      }
+
+      dy = Math.max(0, d);
+      e.preventDefault();
       s.style.transform = `translateY(${dy}px)`;
     }, { passive: false });
 
     function slipp() {
+      kandidat = false;
       if (!dragging) return;
       dragging = false;
       s.classList.remove("dragging");
-      if (dy > 110) closeSheet();
+      if (dy > 100) closeSheet();
       else s.style.transform = "";
     }
     s.addEventListener("pointerup", slipp);
     s.addEventListener("pointercancel", slipp);
-    s.addEventListener("pointerleave", slipp);
   })();
 
   function sheetPlace(id) {
@@ -582,7 +648,7 @@ const UI = (() => {
     $("itemForm").addEventListener("submit", async e => {
       e.preventDefault();
       const btn = $("eLagre"), err = $("eErr");
-      btn.disabled = true; btn.textContent = "Lagrer…";
+      btn.disabled = true; btn.innerHTML = prikker() + " Lagrer";
       try {
         let placeId = $("eSted").value || null;
         if (placeId === "__new") {
@@ -614,7 +680,7 @@ const UI = (() => {
       <div class="grow"><div class="nm">${esc(t.name)}</div><div class="sub">${esc(t.dates || t.org || "")}</div></div>
       <span class="chev">${ICON.chev}</span></button>`).join("");
     openSheet(`<h3>Dine turer</h3>
-      <div class="list" style="margin-top:8px">${rows || '<p class="muted">Henter…</p>'}</div>
+      <div class="list" style="margin-top:8px">${rows || venter("Henter turene dine")}</div>
       <div class="stack" style="margin-top:12px">
         <button class="btn" data-sheet="jointrip">Bli med på en ny tur</button>
         <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
@@ -690,7 +756,7 @@ const UI = (() => {
       const key = (document.querySelector('input[name="tpl"]:checked') || {}).value;
       const tpl = TEMPLATES.find(t => t.key === key) || null;
 
-      btn.disabled = true; btn.textContent = tpl ? "Lager turen og programmet…" : "Lager turen…";
+      btn.disabled = true; btn.innerHTML = prikker() + (tpl ? " Lager turen og programmet" : " Lager turen");
       try {
         const plan = tpl ? templateDates(tpl) : null;
 
@@ -728,7 +794,7 @@ const UI = (() => {
         </div>
         <div class="field" id="memberPick" hidden>
           <label>Velg deltakere</label>
-          <div id="memberList" class="memberlist"><p class="muted" style="padding:10px">Henter deltakere…</p></div>
+          <div id="memberList" class="memberlist">${venter("Henter deltakere")}</div>
         </div>
         <p class="err" id="chErr" hidden></p>
         <button class="btn primary big" type="submit" id="chSubmit">Opprett chat</button>
@@ -788,7 +854,7 @@ const UI = (() => {
         ${ch.private
           ? "Privat chat. Bare de som står her kan lese den — reiseledere ser den ikke."
           : "Åpen chat. Alle som er med på turen kan lese og skrive her."}</p>
-      <div id="cmBody"><p class="muted">Henter…</p></div>
+      <div id="cmBody">${venter("Henter")}</div>
       <button class="btn close" data-close>Lukk</button>`);
 
     if (!ch.private) {
@@ -1010,7 +1076,7 @@ const UI = (() => {
       if (!valgte.length) { err.textContent = "Velg minst én fil."; err.hidden = false; return; }
 
       err.hidden = true;
-      btn.disabled = true; btn.textContent = "Leser filene…";
+      btn.disabled = true; btn.innerHTML = prikker() + " Leser filene";
       try {
         const filer = [];
         for (const f of valgte) filer.push({ navn: f.name, data: await tilBase64(f) });
@@ -1118,7 +1184,7 @@ const UI = (() => {
     const btn = $("impSubmit"), err = $("impErr");
     const GENERISK = /^(hotellet|hotell|lobbyen|lobby|resepsjonen|rommet|bussen|egen hånd|ukjent)$/i;
 
-    btn.disabled = true; btn.textContent = "Legger inn…";
+    btn.disabled = true; btn.innerHTML = prikker() + " Legger inn";
     try {
       const kjente = {};
       for (const p of Object.values(S.trip.places)) kjente[p.name.toLowerCase()] = p.id;
@@ -1193,7 +1259,7 @@ const UI = (() => {
         ${leder
           ? "Reiseledere kan endre programmet og lese inn PDF-er. Du kan gi rollen videre."
           : "Reiseledere kan endre programmet."}</p>
-      <div id="tmBody"><p class="muted">Henter…</p></div>
+      <div id="tmBody">${venter("Henter")}</div>
       <button class="btn close" data-close>Lukk</button>`);
 
     try {
@@ -1246,7 +1312,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-flytt],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -1315,7 +1381,6 @@ const UI = (() => {
 
     // ark
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
-    if (t.dataset.flytt) return flyttPunkt(t.dataset.flytt, t.dataset.vei);
     if (t.dataset.item) return sheetItem(t.dataset.item);
     if (t.dataset.kopi) {
       try { await navigator.clipboard.writeText(t.dataset.kopi); toast("Kopiert: " + t.dataset.kopi); }
@@ -1348,7 +1413,7 @@ const UI = (() => {
     const first = $("fFirst").value.trim(), last = $("fLast").value.trim();
     const err = $("joinErr"), btn = $("joinSubmit");
     if (!first || !last) { err.textContent = "Skriv både fornavn og etternavn."; err.hidden = false; return; }
-    err.hidden = true; btn.disabled = true; btn.textContent = "Blir med…";
+    err.hidden = true; btn.disabled = true; btn.innerHTML = prikker() + " Blir med";
     try {
       Api.setProfile(first, last);
       const trip = await Api.joinByCode($("fCode").value, `${first} ${last}`);
