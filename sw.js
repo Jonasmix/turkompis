@@ -5,8 +5,8 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 31;
-const CACHE = "turkompis-b" + BUILD;
+const BUILD = 32;
+const CACHE = "tourflow-b" + BUILD;
 
 const SHELL = [
   "./",

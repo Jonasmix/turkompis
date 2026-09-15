@@ -1,4 +1,4 @@
-# Turkompis
+# TourFlow
 
 Program, gruppechat og veibeskrivelse for klasseturer. Nettside som kan legges til på
 hjemskjermen (PWA) og virker uten nett. Ingen byggesteg — rene statiske filer på GitHub

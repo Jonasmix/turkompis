@@ -1,6 +1,6 @@
 {
-  "name": "Turkompis",
-  "short_name": "Turkompis",
+  "name": "TourFlow",
+  "short_name": "TourFlow",
   "description": "Program, gruppechat og veibeskrivelse for klasseturen.",
   "start_url": "./",
   "scope": "./",

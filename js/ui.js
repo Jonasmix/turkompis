@@ -360,7 +360,7 @@ const UI = (() => {
     if (!p) return "";
     const day = Parse.dayOf(S.trip, a.date);
     return `<div class="aicard">
-      <div class="hd">${ICON.spark}<span>Turkompis fant en avtale</span></div>
+      <div class="hd">${ICON.spark}<span>TourFlow fant en avtale</span></div>
       <div class="dest">${esc(p.name)}</div>
       <div class="meta">${a.time ? `<span class="mono">${esc(a.time)}</span> · ` : ""}${esc(day ? day.label : a.date)}<br>${esc(p.addr)}</div>
       <div class="why">${esc(a.why)}</div>
@@ -1585,7 +1585,7 @@ const UI = (() => {
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
-        Turkompis samler program, beskjeder og veibeskrivelser for én klassetur. Når noen avtaler
+        TourFlow samler program, beskjeder og veibeskrivelser for én klassetur. Når noen avtaler
         et møtested i chatten, kobler appen det mot programmet og finner riktig adresse for den dagen.</p>
       <div class="card pad" style="padding-block:12px;margin-top:6px">
         <dl class="kv">
