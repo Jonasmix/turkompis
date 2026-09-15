@@ -186,7 +186,7 @@ const UI = (() => {
     const rows = d.items.length ? d.items.map(i => {
       const p = i.place ? trip.places[i.place] : null;
       const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
-      return `<div class="ev ${isNext ? "now" : ""}" ${p ? `data-sheet="place" data-place="${esc(i.place)}" role="button" tabindex="0"` : ""}>
+      return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
         <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
           <div class="title">${esc(i.title)}</div>
@@ -454,16 +454,114 @@ const UI = (() => {
   function sheetPlace(id) {
     const p = S.trip.places[id];
     if (!p) return;
+    const leder = S.trip.role === "leader";
     openSheet(`
       <div class="eyebrow">${esc(p.kind)}</div>
       <h3>${esc(p.name)}</h3>
       <div class="addr">${esc(p.addr || "Ingen adresse lagt inn")}</div>
+      ${p.url ? `<div class="addr"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></div>` : ""}
       ${p.addr ? `<div class="acts">
         <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
         <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
       </div>` : ""}
+      ${leder ? `<form id="adrForm" style="margin-top:16px">
+        <div class="field">
+          <label for="adrInn">${p.addr ? "Endre adresse" : "Legg inn adresse"}</label>
+          <input id="adrInn" value="${esc(p.addr)}" placeholder="Gate, postnummer, sted">
+        </div>
+        <button class="btn primary" style="width:100%" type="submit">Lagre adressen</button>
+      </form>` : ""}
       <button class="btn close" data-close>Lukk</button>`);
+
+    if (leder) $("adrForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      try {
+        await Api.updatePlace(id, { addr: $("adrInn").value.trim() });
+        closeSheet();
+        await openTrip(S.trip.id);
+        toast("Adressen er lagret.");
+      } catch { toast("Klarte ikke lagre adressen."); }
+    });
   }
+
+  /* Ett programpunkt: kart for alle, og endring for reiseledere. */
+  function sheetItem(itemId) {
+    const dag = S.trip.days.find(d => d.items.some(i => i.id === itemId));
+    const it = dag && dag.items.find(i => i.id === itemId);
+    if (!it) return;
+    const p = it.place ? S.trip.places[it.place] : null;
+    const leder = S.trip.role === "leader";
+
+    openSheet(`
+      <div class="eyebrow">${esc(dag.label)}${it.t ? " · " + esc(it.t) : ""}</div>
+      <h3>${esc(it.title)}</h3>
+      ${p ? `<div class="addr">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : " · ingen adresse"}</div>` : ""}
+      ${it.note ? `<div class="addr">${esc(it.note)}</div>` : ""}
+      ${p && p.addr ? `<div class="acts">
+        <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
+        <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
+      </div>` : ""}
+
+      ${leder ? `
+        <form id="itemForm" style="margin-top:18px;border-top:1px solid var(--line-soft);padding-top:16px">
+          <div class="eyebrow" style="margin-bottom:10px">Endre punktet</div>
+          <div class="field"><label for="eTid">Klokkeslett</label>
+            <input id="eTid" type="time" value="${esc(it.t)}">
+            <small style="color:var(--ink-3);display:block;margin-top:5px">La stå tomt hvis tiden ikke er bestemt.</small></div>
+          <div class="field"><label for="eTittel">Hva skjer</label><input id="eTittel" value="${esc(it.title)}"></div>
+          <div class="field"><label for="eSted">Sted</label>
+            <select id="eSted" class="select">
+              <option value="">Ingen / ikke stedfestet</option>
+              ${placeOptions(it.place)}
+              <option value="__new">+ Nytt sted…</option>
+            </select></div>
+          <div id="eNyttSted" hidden>
+            <div class="field"><label for="eNavn">Navn på stedet</label><input id="eNavn"></div>
+            <div class="field"><label for="eAdr">Adresse</label><input id="eAdr" placeholder="Gate, postnummer, sted"></div>
+          </div>
+          <div class="field"><label for="eNotat">Notat</label><input id="eNotat" value="${esc(it.note)}"></div>
+          <p class="err" id="eErr" hidden></p>
+          <button class="btn primary big" type="submit" id="eLagre">Lagre endringene</button>
+        </form>
+        <button class="btn danger" style="width:100%;margin-top:10px" data-delitem="${esc(it.id)}">Slett punktet</button>
+      ` : ""}
+      <button class="btn close" data-close>Lukk</button>`);
+
+    if (!leder) return;
+
+    $("eSted").addEventListener("change", e => {
+      $("eNyttSted").hidden = e.target.value !== "__new";
+    });
+
+    $("itemForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const btn = $("eLagre"), err = $("eErr");
+      btn.disabled = true; btn.textContent = "Lagrer…";
+      try {
+        let placeId = $("eSted").value || null;
+        if (placeId === "__new") {
+          const navn = $("eNavn").value.trim();
+          if (!navn) throw new Error("Stedet trenger et navn.");
+          placeId = await Api.addPlace(S.trip.id, {
+            name: navn, addr: $("eAdr").value.trim(), kind: "Sted"
+          });
+        }
+        await Api.updateItem(it.id, {
+          t: $("eTid").value,
+          title: $("eTittel").value.trim() || it.title,
+          placeId,
+          note: $("eNotat").value.trim()
+        });
+        closeSheet();
+        await openTrip(S.trip.id);
+        toast("Punktet er oppdatert.");
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Lagre endringene";
+        err.textContent = e2.message; err.hidden = false;
+      }
+    });
+  }
+
 
   function sheetTrips() {
     const rows = S.trips.map(t => `<button class="listrow" data-opentrip="${esc(t.id)}" aria-current="${t.id === S.trip.id}">
@@ -912,32 +1010,39 @@ const UI = (() => {
 
       const punkter = (d.punkter || []).map((p, j) => {
         if (!p.tid) utenTid++;
-        return `<label class="person" style="align-items:flex-start">
-          <input type="checkbox" data-punkt="${i}-${j}" checked>
-          <span>
-            ${p.tid
-              ? `<b class="mono">${esc(p.tid)}</b> ${esc(p.tittel)}`
-              : `${esc(p.tittel)}<br><input type="time" data-tid="${i}-${j}" class="tidfelt"
-                   aria-label="Klokkeslett for ${esc(p.tittel)}">
-                 <small style="color:var(--ink-3)">sto ikke i filen</small>`}
-            ${p.stedNavn ? `<br><small style="color:var(--ink-3)">${esc(p.stedNavn)}${p.stedAdresse ? " · " + esc(p.stedAdresse) : " · mangler adresse"}</small>` : ""}
-          </span>
-        </label>`;
+        return `<div class="imprad">
+          <label class="impvelg">
+            <input type="checkbox" data-punkt="${i}-${j}" checked>
+            <span class="imptxt">
+              ${p.tid ? `<b class="mono">${esc(p.tid)}</b> ` : ""}${esc(p.tittel)}
+              ${p.stedNavn ? `<small>${esc(p.stedNavn)}</small>` : ""}
+            </span>
+          </label>
+          ${p.tid ? "" : `<div class="imptid">
+            <label for="tid-${i}-${j}">Klokkeslett — sto ikke i filen</label>
+            <input type="time" id="tid-${i}-${j}" data-tid="${i}-${j}">
+          </div>`}
+        </div>`;
       }).join("");
 
-      // Hotell uten adresse blir ikke navigerbart — spør om den her.
-      const hotellFelt = d.hotellNavn && !d.hotellAdresse
-        ? `<div class="field" style="margin:6px 0 10px">
-             <input data-hoteladr="${i}" placeholder="Adresse til ${esc(d.hotellNavn)}">
-             <small style="color:var(--ink-3);display:block;margin-top:5px">
-               ${d.hotellNettside ? "Filen oppga bare en nettlenke. " : "Sto ikke i filen. "}Uten adresse virker ikke kartet.</small>
-           </div>`
-        : "";
+      // Bare hotellet trenger adresse med én gang — det er det «hotellet»
+      // i chatten slår opp mot. Andre steder kan fylles inn etterpå.
+      const hotell = d.hotellNavn ? `
+        <div class="hotellboks">
+          <div class="hotellnavn">
+            <span>${esc(d.hotellNavn)}</span>
+            <button type="button" class="btn quiet" data-kopi="${esc(d.hotellNavn)}">Kopier navn</button>
+          </div>
+          ${d.hotellAdresse
+            ? `<small>${esc(d.hotellAdresse)}</small>`
+            : `<input data-hoteladr="${i}" placeholder="Lim inn adressen her">
+               <small>Filen oppga ${d.hotellNettside ? "bare en nettlenke" : "ingen adresse"}.
+               Kopier navnet, søk det opp i kart, og lim adressen inn her — ellers virker ikke veibeskrivelsen.</small>`}
+        </div>` : "";
 
-      return `<div style="margin-bottom:18px">
-        <div class="eyebrow" style="margin-bottom:6px">${esc(dag.label)}</div>
-        ${d.hotellNavn ? `<p class="muted" style="margin:0 0 5px">Hotell: ${esc(d.hotellNavn)}</p>` : ""}
-        ${hotellFelt}
+      return `<div style="margin-bottom:20px">
+        <div class="eyebrow" style="margin-bottom:7px">${esc(dag.label)}</div>
+        ${hotell}
         <div class="memberlist">${punkter || '<p class="muted" style="padding:10px">Ingen punkter.</p>'}</div>
       </div>`;
     }).join("");
@@ -946,11 +1051,11 @@ const UI = (() => {
 
     openSheet(`<h3>Forslag fra filen</h3>
       <p class="muted" style="margin:6px 0 14px">
-        ${dager.length} dager og ${antall} punkter. Hak av det som skal inn.</p>
+        ${dager.length} dager og ${antall} punkter, i samme rekkefølge som i filen.</p>
       ${utenTid ? `<div class="card pad" style="padding-block:12px;margin-bottom:14px;border-left:3px solid var(--blue)">
         <div class="eyebrow" style="color:var(--blue-ink)">${utenTid} punkter uten klokkeslett</div>
         <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">Filen oppga ingen tid for disse.
-        Fyll inn hvis du vet den — ellers legges de inn uten, og vises nederst på dagen.</p></div>` : ""}
+        De beholder rekkefølgen sin uansett. Du kan fylle inn tid nå, eller senere.</p></div>` : ""}
       ${advarsler.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-left:3px solid var(--amber)">
         <div class="eyebrow" style="color:var(--amber)">Appen er usikker på</div>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
@@ -965,13 +1070,10 @@ const UI = (() => {
 
   async function leggInnForslag(dager) {
     const btn = $("impSubmit"), err = $("impErr");
-    // «hotellet» og «lobbyen» er ikke steder — appen vet allerede hvilket
-    // hotell dagen har. Slike navn droppes, ellers fyller de opp stedslista.
     const GENERISK = /^(hotellet|hotell|lobbyen|lobby|resepsjonen|rommet|bussen|egen hånd|ukjent)$/i;
 
     btn.disabled = true; btn.textContent = "Legger inn…";
     try {
-      // Gjenbruk steder som allerede finnes, så vi ikke får duplikater.
       const kjente = {};
       for (const p of Object.values(S.trip.places)) kjente[p.name.toLowerCase()] = p.id;
 
@@ -1006,6 +1108,8 @@ const UI = (() => {
           if (hid) await Api.setHotel(dagId, hid);
         }
 
+        // Rekkefølgen fra filen beholdes — den bærer mening når tiden mangler.
+        let n = 10;
         for (const { p, j } of valgte) {
           const tidFelt = document.querySelector(`[data-tid="${i}-${j}"]`);
           const tid = p.tid || (tidFelt ? tidFelt.value : "");
@@ -1014,8 +1118,10 @@ const UI = (() => {
             t: /^\d{2}:\d{2}$/.test(tid) ? tid : null,
             title: p.tittel || "Programpunkt",
             placeId: sid,
-            note: p.notat || ""
+            note: p.notat || "",
+            sort: n
           });
+          n += 10;
         }
       }
 
@@ -1029,6 +1135,7 @@ const UI = (() => {
       err.hidden = false;
     }
   }
+
 
 
   function sheetAbout() {
@@ -1051,7 +1158,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -1120,6 +1227,12 @@ const UI = (() => {
 
     // ark
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
+    if (t.dataset.item) return sheetItem(t.dataset.item);
+    if (t.dataset.kopi) {
+      try { await navigator.clipboard.writeText(t.dataset.kopi); toast("Kopiert: " + t.dataset.kopi); }
+      catch { toast("Kopiering ble blokkert — merk teksten manuelt."); }
+      return;
+    }
     if (t.dataset.sheet === "place") return sheetPlace(t.dataset.place);
     if (t.dataset.sheet === "jointrip") return sheetJoinTrip();
     if (t.dataset.sheet === "newtrip") return sheetNewTrip();

@@ -156,7 +156,7 @@ const Api = (() => {
         sb.from("members").select("role, name").eq("trip_id", tripId).eq("user_id", userId).single(),
         sb.from("places").select("*").eq("trip_id", tripId),
         sb.from("days").select("*").eq("trip_id", tripId).order("date"),
-        sb.from("items").select("*").eq("trip_id", tripId).order("t"),
+        sb.from("items").select("*").eq("trip_id", tripId),
         sb.from("channels").select("*").eq("trip_id", tripId).order("created_at")
       ]);
       for (const r of [trip, member, places, days, items, channels]) if (r.error) throw r.error;
@@ -178,6 +178,14 @@ const Api = (() => {
     return snap;
   }
 
+
+  /* Rekkefølgen i heftet bærer mening når klokkeslettet mangler, så «sort»
+     bestemmer. Faller den bort (gammel base), sorteres det på tid i stedet. */
+  function rekkefolge(a, b) {
+    const sa = a.sort, sb2 = b.sort;
+    if (sa != null && sb2 != null && sa !== sb2) return sa - sb2;
+    return (a.t || "99:99").localeCompare(b.t || "99:99");
+  }
   function build(trip, member, places, days, items, channels) {
     const placeMap = {};
     for (const p of places) {
@@ -197,8 +205,9 @@ const Api = (() => {
       places: placeMap,
       days: days.map(d => Object.assign({
         id: d.id, date: d.date, hotel: d.hotel_place_id,
-        items: (byDay[d.id] || []).sort((a, b) => (a.t || "99:99").localeCompare(b.t || "99:99")).map(i => ({
-          id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src
+        items: (byDay[d.id] || []).sort(rekkefolge).map(i => ({
+          id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src,
+          sort: (i.sort === undefined || i.sort === null) ? null : i.sort
         }))
       }, fmtDay(d.date))),
       channels: channels.map(c => ({ id: c.id, name: c.name, sub: c.sub, private: c.private === true }))
@@ -364,13 +373,40 @@ const Api = (() => {
     if (error) throw error;
   }
 
-  async function addItem(tripId, dayId, { t, title, placeId, note }) {
-    const { data, error } = await sb.from("items").insert({
+  async function addItem(tripId, dayId, { t, title, placeId, note, sort }) {
+    const rad = {
       trip_id: tripId, day_id: dayId, t: t || null, title,
       place_id: placeId || null, note: note || ""
-    }).select().single();
+    };
+    let svar = await sb.from("items").insert({ ...rad, sort: sort || 0 }).select().single();
+    // Er ikke rekkefolge-kolonnen lagt til enda, legg inn punktet uten den.
+    if (svar.error && /sort/.test(svar.error.message || "")) {
+      svar = await sb.from("items").insert(rad).select().single();
+    }
+    if (svar.error) throw svar.error;
+    return svar.data.id;
+  }
+
+  /* Endre et punkt som allerede ligger inne: tid, tittel, sted eller notat. */
+  async function updateItem(id, felter) {
+    const rad = {};
+    if ("t" in felter) rad.t = felter.t || null;
+    if ("title" in felter) rad.title = felter.title;
+    if ("placeId" in felter) rad.place_id = felter.placeId || null;
+    if ("note" in felter) rad.note = felter.note || "";
+    if ("sort" in felter) rad.sort = felter.sort;
+    const { error } = await sb.from("items").update(rad).eq("id", id);
     if (error) throw error;
-    return data.id;
+  }
+
+  /* Endre et sted — for eksempel legge inn adressen som manglet i heftet. */
+  async function updatePlace(id, felter) {
+    const rad = {};
+    if ("name" in felter) rad.name = felter.name;
+    if ("addr" in felter) rad.addr = felter.addr;
+    if ("kind" in felter) rad.kind = felter.kind;
+    const { error } = await sb.from("places").update(rad).eq("id", id);
+    if (error) throw error;
   }
 
   async function deleteItem(id) {
@@ -456,7 +492,7 @@ const Api = (() => {
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember,
-    addPlace, addDay, setHotel, addItem, deleteItem, deleteDay,
+    addPlace, updatePlace, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal
   };
 })();

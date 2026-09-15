@@ -394,3 +394,23 @@ alter table public.items alter column t drop not null;
 
 -- Steder kan ha en nettside når heftet oppgir lenke i stedet for adresse.
 alter table public.places add column if not exists url text not null default '';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 04 — rekkefølge på programpunkter
+--  Punkter uten klokkeslett har likevel en rekkefølge i heftet.
+--  Uten dette havnet de nederst på dagen, løsrevet fra sammenhengen.
+-- ═══════════════════════════════════════════════════════════════
+
+alter table public.items add column if not exists sort int not null default 0;
+
+-- Gi eksisterende punkter en rekkefølge etter klokkeslett, så de ikke
+-- stokker om seg når appen begynner å sortere på sort.
+with nummerert as (
+  select id, row_number() over (partition by day_id order by t nulls last, title) * 10 as n
+  from public.items
+)
+update public.items i set sort = nummerert.n
+from nummerert where nummerert.id = i.id and i.sort = 0;
+
+drop index if exists items_day_idx;
+create index if not exists items_day_idx on public.items (day_id, sort);
