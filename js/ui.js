@@ -183,7 +183,7 @@ const UI = (() => {
     ).join("") + (leader ? `<button class="chip" data-sheet="addday" style="border-style:dashed">+ Dag<span>ny dato</span></button>` : "");
 
     const hotel = d.hotel ? trip.places[d.hotel] : null;
-    const rows = d.items.length ? d.items.map(i => {
+    const rows = d.items.length ? d.items.map((i, k) => {
       const p = i.place ? trip.places[i.place] : null;
       const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
       return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
@@ -191,7 +191,11 @@ const UI = (() => {
         <div>
           <div class="title">${esc(i.title)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
-          ${S.edit ? `<div class="src"><button class="btn danger" style="min-height:34px;padding:5px 10px;font-size:12px" data-delitem="${esc(i.id)}">Slett punkt</button></div>` : ""}
+          ${S.edit ? `<div class="redigerrad">
+            <button class="minibtn" data-flytt="${esc(i.id)}" data-vei="opp" ${k === 0 ? "disabled" : ""} aria-label="Flytt opp">↑</button>
+            <button class="minibtn" data-flytt="${esc(i.id)}" data-vei="ned" ${k === d.items.length - 1 ? "disabled" : ""} aria-label="Flytt ned">↓</button>
+            <button class="minibtn fare" data-delitem="${esc(i.id)}">Slett</button>
+          </div>` : ""}
         </div>
       </div>`;
     }).join("") : `<p class="muted" style="padding:16px 0;text-align:center">Ingen punkter denne dagen.</p>`;
@@ -214,6 +218,31 @@ const UI = (() => {
       </div>` : ""}`;
   }
 
+
+  /* Bytt plass på to punkter, og skriv rekkefølgen til hele dagen på nytt.
+     Da spiller det ingen rolle om punktene manglet rekkefølge fra før. */
+  async function flyttPunkt(itemId, vei) {
+    const dag = S.trip.days.find(d => d.items.some(i => i.id === itemId));
+    if (!dag) return;
+    const liste = dag.items.slice();
+    const fra = liste.findIndex(i => i.id === itemId);
+    const til = vei === "opp" ? fra - 1 : fra + 1;
+    if (til < 0 || til >= liste.length) return;
+
+    liste.splice(til, 0, liste.splice(fra, 1)[0]);
+    dag.items = liste;          // vis flyttingen med én gang
+    render();
+
+    try {
+      for (let n = 0; n < liste.length; n++) {
+        await Api.updateItem(liste[n].id, { sort: (n + 1) * 10 });
+      }
+      await openTrip(S.trip.id);
+    } catch {
+      toast("Klarte ikke lagre rekkefølgen.");
+      await openTrip(S.trip.id);
+    }
+  }
   /* ───────────────── chat ───────────────── */
   function actionCard(a) {
     const p = S.trip.places[a.place];
@@ -311,6 +340,7 @@ const UI = (() => {
       </div>
 
       <div class="stack">
+        <button class="btn" data-sheet="deltakere">Deltakere og roller</button>
         <button class="btn" data-sheet="jointrip">Bli med på en ny tur</button>
         <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
         <button class="btn" data-sheet="about">Om appen og personvern</button>
@@ -341,6 +371,9 @@ const UI = (() => {
     $("banner").innerHTML = S.offline
       ? `<div class="offlinebar">Ingen forbindelse — viser sist lagrede program. Meldinger sendes ikke.</div>` : "";
 
+    const chipsFor = $("screen").querySelector(".chips");
+    const chipsScroll = chipsFor ? chipsFor.scrollLeft : 0;
+
     $("screen").innerHTML = S.tab === "program" ? viewProgram()
                           : S.tab === "chat" ? viewChat()
                           : viewMe();
@@ -354,6 +387,19 @@ const UI = (() => {
       $("composer").addEventListener("submit", onSend);
       const sc = $("screen"); sc.scrollTop = sc.scrollHeight;
     } else slot.innerHTML = "";
+
+    // Dagsvelgeren skal stå der du forlot den, ikke hoppe til mandag.
+    const chipsEtter = $("screen").querySelector(".chips");
+    if (chipsEtter) {
+      chipsEtter.scrollLeft = chipsScroll;
+      const valgt = chipsEtter.querySelector('[aria-pressed="true"]');
+      if (valgt) {
+        const v = valgt.getBoundingClientRect(), c = chipsEtter.getBoundingClientRect();
+        if (v.left < c.left || v.right > c.right) {
+          chipsEtter.scrollLeft += v.left - c.left - (c.width - v.width) / 2;
+        }
+      }
+    }
 
     // Fanerada er i veien når du skriver i en samtale.
     $("tabbar").hidden = Boolean(conv);
@@ -1138,6 +1184,48 @@ const UI = (() => {
 
 
 
+
+  /* Deltakere på turen, og hvem som er reiseleder. */
+  async function sheetTripMembers() {
+    const leder = S.trip.role === "leader";
+    openSheet(`<h3>Deltakere</h3>
+      <p class="muted" style="margin:6px 0 14px">
+        ${leder
+          ? "Reiseledere kan endre programmet og lese inn PDF-er. Du kan gi rollen videre."
+          : "Reiseledere kan endre programmet."}</p>
+      <div id="tmBody"><p class="muted">Henter…</p></div>
+      <button class="btn close" data-close>Lukk</button>`);
+
+    try {
+      const folk = await Api.tripMembers(S.trip.id);
+      const ledere = folk.filter(p => p.role === "leader");
+
+      $("tmBody").innerHTML = `<div class="memberlist">${folk.map(p => `
+        <div class="person">
+          <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
+          ${leder ? (p.role === "leader"
+            ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
+            : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`) : ""}
+        </div>`).join("")}</div>
+        ${leder ? `<p class="muted" style="margin-top:12px">Den som laget turen beholder lederrollen,
+          og turen må alltid ha minst én.</p>` : ""}`;
+
+      $("tmBody").addEventListener("click", async ev => {
+        const b = ev.target.closest("[data-rolle]");
+        if (!b) return;
+        const navn = b.closest(".person").innerText.split("\n")[0];
+        if (b.dataset.til === "leader" && !confirm(`Gi ${navn} lederrollen? Da kan hen endre programmet.`)) return;
+        try {
+          await Api.setMemberRole(S.trip.id, b.dataset.rolle, b.dataset.til);
+          await openTrip(S.trip.id);
+          sheetTripMembers();
+          toast("Rollen er endret.");
+        } catch (e) { toast(e.message || "Klarte ikke endre rollen."); }
+      });
+    } catch {
+      $("tmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
+    }
+  }
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
@@ -1158,7 +1246,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-flytt],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -1227,6 +1315,7 @@ const UI = (() => {
 
     // ark
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
+    if (t.dataset.flytt) return flyttPunkt(t.dataset.flytt, t.dataset.vei);
     if (t.dataset.item) return sheetItem(t.dataset.item);
     if (t.dataset.kopi) {
       try { await navigator.clipboard.writeText(t.dataset.kopi); toast("Kopiert: " + t.dataset.kopi); }
@@ -1240,6 +1329,7 @@ const UI = (() => {
     if (t.dataset.sheet === "addday") return sheetAddDay();
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
+    if (t.dataset.sheet === "deltakere") return sheetTripMembers();
     if (t.dataset.sheet === "about") return sheetAbout();
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();
 

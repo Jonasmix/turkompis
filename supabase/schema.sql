@@ -414,3 +414,43 @@ from nummerert where nummerert.id = i.id and i.sort = 0;
 
 drop index if exists items_day_idx;
 create index if not exists items_day_idx on public.items (day_id, sort);
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 05 — flere reiseledere
+--  Den som laget turen kan gi lederrollen videre, slik at flere kan
+--  endre programmet. Rollen settes gjennom en funksjon, ikke ved at
+--  appen skriver rett i tabellen — da kan ingen gi seg selv rollen.
+-- ═══════════════════════════════════════════════════════════════
+
+create or replace function public.set_member_role(
+  p_trip uuid, p_user uuid, p_role text
+) returns boolean language plpgsql security definer set search_path = public as $$
+declare v_eier uuid; v_ledere int;
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  if p_role not in ('member', 'leader') then raise exception 'ukjent_rolle'; end if;
+  if not public.is_trip_leader(p_trip) then raise exception 'ikke_leder'; end if;
+
+  if not exists (select 1 from public.members where trip_id = p_trip and user_id = p_user) then
+    raise exception 'ikke_medlem';
+  end if;
+
+  -- Den som opprettet turen beholder lederrollen. Ellers kunne noen du
+  -- nettopp forfremmet ta fra deg turen din.
+  select created_by into v_eier from public.trips where id = p_trip;
+  if p_user = v_eier and p_role <> 'leader' then raise exception 'eier_beholder_rollen'; end if;
+
+  -- En tur uten reiseledere kan ingen redigere igjen.
+  if p_role = 'member' then
+    select count(*) into v_ledere from public.members
+     where trip_id = p_trip and role = 'leader';
+    if v_ledere <= 1 then raise exception 'siste_leder'; end if;
+  end if;
+
+  update public.members set role = p_role
+   where trip_id = p_trip and user_id = p_user;
+  return true;
+end; $$;
+
+revoke all on function public.set_member_role(uuid, uuid, text) from public;
+grant execute on function public.set_member_role(uuid, uuid, text) to authenticated;

@@ -143,6 +143,9 @@ const Api = (() => {
     if (m.includes("ingen_tilgang")) return new Error("Du har ikke tilgang til denne chatten.");
     if (m.includes("ikke_paa_turen")) return new Error("Personen er ikke med på turen.");
     if (m.includes("ukjent_chat")) return new Error("Fant ikke chatten.");
+    if (m.includes("ikke_leder")) return new Error("Bare reiseledere kan endre roller.");
+    if (m.includes("eier_beholder_rollen")) return new Error("Den som laget turen beholder lederrollen.");
+    if (m.includes("siste_leder")) return new Error("Turen må ha minst én reiseleder.");
     if (m.includes("ikke_innlogget")) return new Error("Appen fikk ikke kontakt med serveren. Prøv igjen.");
     return new Error(m || "Noe gikk galt.");
   }
@@ -399,6 +402,14 @@ const Api = (() => {
     if (error) throw error;
   }
 
+  /* Gi eller ta lederrollen. Reglene ligger i basen, ikke her. */
+  async function setMemberRole(tripId, personId, rolle) {
+    const { error } = await sb.rpc("set_member_role", {
+      p_trip: tripId, p_user: personId, p_role: rolle
+    });
+    if (error) throw friendly(error);
+  }
+
   /* Endre et sted — for eksempel legge inn adressen som manglet i heftet. */
   async function updatePlace(id, felter) {
     const rad = {};
@@ -491,7 +502,7 @@ const Api = (() => {
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
-    addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember,
+    addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     addPlace, updatePlace, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal
   };

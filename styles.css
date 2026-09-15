@@ -316,3 +316,13 @@ label.person span{flex:1;min-width:0}
 .hotellboks input{width:100%;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;
   padding:11px 12px;font-size:16px;margin-top:9px}
 .hotellboks small{display:block;color:var(--ink-3);font-size:12.5px;margin-top:7px;line-height:1.45}
+
+/* Flytt og slett i redigeringsmodus */
+.redigerrad{display:flex;gap:7px;margin-top:8px}
+.minibtn{
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;
+  border-radius:9px;min-width:40px;min-height:36px;padding:4px 11px;
+  font-family:"Archivo",sans-serif;font-weight:600;font-size:13px;
+}
+.minibtn:disabled{opacity:.35;cursor:default}
+.minibtn.fare{color:var(--danger)}
