@@ -945,13 +945,17 @@ const UI = (() => {
   async function leggInnForslag(dager) {
     const btn = $("impSubmit"), err = $("impErr");
     btn.disabled = true; btn.textContent = "Legger inn…";
+      // «hotellet» og «lobbyen» er ikke steder — appen vet allerede hvilket
+      // hotell dagen har. Slike navn droppes, ellers fyller de opp stedslista.
+      const GENERISK = /^(hotellet|hotell|lobbyen|lobby|resepsjonen|rommet|bussen|egen hånd|ukjent)$/i;
+
     try {
       // Gjenbruk steder som allerede finnes, så vi ikke får duplikater.
       const kjente = {};
       for (const p of Object.values(S.trip.places)) kjente[p.name.toLowerCase()] = p.id;
 
       const stedId = async (navn, adresse, type) => {
-        if (!navn) return null;
+        if (!navn || GENERISK.test(navn.trim())) return null;
         const n = navn.toLowerCase();
         if (kjente[n]) return kjente[n];
         const id = await Api.addPlace(S.trip.id, { name: navn, addr: adresse || "", kind: type || "Sted" });
