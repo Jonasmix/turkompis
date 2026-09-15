@@ -434,3 +434,8 @@ label.person span{flex:1;min-width:0}
 .oppgave:last-child{border-bottom:0}
 .oppgave .listrow{border-bottom:0;padding-bottom:4px}
 .skjulknapp{font-size:12.5px;padding:2px 0 12px;color:var(--ink-3);text-decoration:none;border-bottom:1px dashed var(--line)}
+
+/* «eller»-skille på innloggingsskjermen */
+.skille{display:flex;align-items:center;gap:12px;margin:22px 0;color:var(--ink-3);
+  font-family:"Archivo",sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.skille::before,.skille::after{content:"";flex:1;height:1px;background:var(--line)}

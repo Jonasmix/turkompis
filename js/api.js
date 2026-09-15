@@ -64,6 +64,7 @@ const Api = (() => {
         data = { session: res.data.session };
       }
       userId = data.session.user.id;
+      await lesInnlogging();
       return { ok: true };
     } catch (e) {
       return { ok: false, reason: "nettverk", error: String(e.message || e) };
@@ -610,6 +611,83 @@ const Api = (() => {
     if (!best || avstand > 3 * 3600 * 1000) return null;
     return best;
   }
+
+  /* ───────── e-post som identitet ─────────
+     Anonym pålogging er fortsatt inngangen — den krever ingenting og
+     virker med én gang. Men identiteten bor da i nettleseren, og
+     forsvinner med den. Kobler du på en e-post, beholder du samme bruker
+     og dermed turene og lederrollene dine, men kan logge inn hvor som
+     helst. */
+
+  const minEpost = () => cache.epost || null;
+
+  async function lesInnlogging() {
+    if (!sb) return null;
+    const { data } = await sb.auth.getUser();
+    const u = data && data.user;
+    cache.epost = u && u.email ? u.email : null;
+    cache.anonym = !!(u && u.is_anonymous);
+    return { epost: cache.epost, anonym: cache.anonym };
+  }
+
+  const erAnonym = () => cache.anonym !== false;
+
+  /* Ny eller eksisterende bruker: send kode til e-posten. */
+  async function sendKode(epost) {
+    const { error } = await sb.auth.signInWithOtp({
+      email: epost.trim(),
+      options: { shouldCreateUser: true }
+    });
+    if (error) throw epostFeil(error);
+  }
+
+  async function bekreftKode(epost, kode) {
+    const { error } = await sb.auth.verifyOtp({
+      email: epost.trim(), token: kode.trim(), type: "email"
+    });
+    if (error) throw epostFeil(error);
+    await lesInnlogging();
+  }
+
+  /* Koble e-post til kontoen du alt har, så du beholder turene dine. */
+  async function koblePaaEpost(epost) {
+    const { error } = await sb.auth.updateUser({ email: epost.trim() });
+    if (error) throw epostFeil(error);
+  }
+
+  async function bekreftKobling(epost, kode) {
+    const { error } = await sb.auth.verifyOtp({
+      email: epost.trim(), token: kode.trim(), type: "email_change"
+    });
+    if (error) throw epostFeil(error);
+    await lesInnlogging();
+  }
+
+  function epostFeil(error) {
+    const m = String(error.message || "").toLowerCase();
+    if (m.includes("rate") || m.includes("too many")) {
+      return new Error("For mange forsøk. Vent noen minutter og prøv igjen.");
+    }
+    if (m.includes("invalid") && m.includes("token")) return new Error("Koden stemte ikke. Sjekk at du skrev alle sifrene.");
+    if (m.includes("expired")) return new Error("Koden er utløpt. Be om en ny.");
+    if (m.includes("already registered") || m.includes("already been registered")) {
+      return new Error("Den e-posten er alt i bruk. Logg inn med den i stedet.");
+    }
+    if (m.includes("email")) return new Error("Sjekk at e-postadressen er riktig skrevet.");
+    return new Error(error.message || "Noe gikk galt.");
+  }
+
+  /* Navnet ditt ligger lokalt. Logger du inn på en ny telefon, henter vi
+     det fra turene du er medlem av i stedet for å spørre på nytt. */
+  async function hentNavnFraTurer() {
+    const { data } = await sb.from("members").select("name").eq("user_id", userId).limit(1);
+    return data && data.length ? data[0].name : null;
+  }
+
+  async function loggUt() {
+    try { await sb.auth.signOut(); } catch {}
+    Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
+  }
   function signOutLocal() {
     Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
     if (sb) sb.auth.signOut().catch(() => {});
@@ -623,6 +701,8 @@ const Api = (() => {
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
-    applyTemplate, lesProgramFraPdf, signOutLocal
+    applyTemplate, lesProgramFraPdf, signOutLocal,
+    lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
+    hentNavnFraTurer, loggUt
   };
 })();

@@ -638,8 +638,13 @@ const UI = (() => {
           <dl class="kv">
             <dt>Navn</dt><dd>${esc(p ? p.name : "—")}</dd>
             <dt>Rolle</dt><dd>${trip.role === "leader" ? "Reiseleder" : "Deltaker"}</dd>
+            <dt>Konto</dt><dd>${Api.erAnonym()
+              ? 'Gjest <span class="tag amber">bare på denne telefonen</span>'
+              : esc(Api.minEpost() || "Innlogget")}</dd>
           </dl>
         </div>
+        ${Api.erAnonym() ? `<button class="btn primary" style="width:100%;margin-top:10px" data-sheet="koblepost">Sikre kontoen med e-post</button>
+          <p class="muted" style="margin-top:7px">Som gjest bor kontoen din i denne nettleseren. Bytter du telefon eller tømmer nettleserdata, er turene borte.</p>` : ""}
       </div>
 
       <div>
@@ -1582,6 +1587,114 @@ const UI = (() => {
       $("tmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
     }
   }
+
+  /* ───────────────── e-post ─────────────────
+     To bruk: logge inn på nytt, eller knytte e-post til gjestekontoen
+     man alt har. Begge går i to steg — adresse, så kode fra e-posten. */
+  function sheetEpost(modus) {
+    const kobler = modus === "koble";
+    openSheet(`<h3>${kobler ? "Sikre kontoen med e-post" : "Logg inn med e-post"}</h3>
+      <p class="muted" style="margin:6px 0 14px">
+        ${kobler
+          ? "Du beholder turene og rollene dine. Med e-post kan du logge inn på en annen telefon, og du mister ikke alt hvis denne blir borte."
+          : "Vi sender en sekssifret kode. Ingen passord å huske."}</p>
+      <form id="epostForm">
+        <div class="field">
+          <label for="ePost">E-post</label>
+          <input id="ePost" type="email" inputmode="email" autocomplete="email"
+                 autocapitalize="none" spellcheck="false" placeholder="navn@eksempel.no">
+        </div>
+        <p class="err" id="eFeil" hidden></p>
+        <button class="btn primary big" type="submit" id="eSend">Send kode</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("epostForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const epost = $("ePost").value.trim();
+      const feil = $("eFeil"), knapp = $("eSend");
+      if (!epost.includes("@") || !epost.includes(".")) {
+        feil.textContent = "Skriv en gyldig e-postadresse."; feil.hidden = false; return;
+      }
+      feil.hidden = true;
+      knapp.disabled = true; knapp.innerHTML = prikker() + " Sender";
+      try {
+        if (kobler) await Api.koblePaaEpost(epost);
+        else await Api.sendKode(epost);
+        sheetKode(epost, kobler);
+      } catch (e2) {
+        knapp.disabled = false; knapp.textContent = "Send kode";
+        feil.textContent = e2.message; feil.hidden = false;
+      }
+    });
+  }
+
+  function sheetKode(epost, kobler) {
+    openSheet(`<h3>Sjekk e-posten</h3>
+      <p class="muted" style="margin:6px 0 14px">
+        Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.
+        Finner du den ikke, se i søppelpost.</p>
+      <form id="kodeForm">
+        <div class="field">
+          <label for="eKode">Kode</label>
+          <input id="eKode" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="8" class="mono" style="font-size:22px;letter-spacing:.3em" placeholder="000000">
+        </div>
+        <p class="err" id="kFeil" hidden></p>
+        <button class="btn primary big" type="submit" id="kSend">Logg inn</button>
+      </form>
+      <button class="btn" style="width:100%;margin-top:10px" data-sheet="${kobler ? "koblepost" : "logginn"}">Bruk en annen adresse</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    setTimeout(() => { const f = $("eKode"); if (f) f.focus(); }, 150);
+
+    $("kodeForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const kode = $("eKode").value.trim();
+      const feil = $("kFeil"), knapp = $("kSend");
+      if (kode.length < 6) { feil.textContent = "Koden er seks siffer."; feil.hidden = false; return; }
+      feil.hidden = true;
+      knapp.disabled = true; knapp.innerHTML = prikker() + " Sjekker";
+      try {
+        if (kobler) {
+          await Api.bekreftKobling(epost, kode);
+          closeSheet();
+          render();
+          toast("Kontoen er sikret med " + epost);
+        } else {
+          await Api.bekreftKode(epost, kode);
+          closeSheet();
+          await etterInnlogging();
+        }
+      } catch (e2) {
+        knapp.disabled = false; knapp.textContent = "Logg inn";
+        feil.textContent = e2.message; feil.hidden = false;
+      }
+    });
+  }
+
+  /* Etter innlogging på en ny telefon: hent navnet fra turene i stedet
+     for å spørre om det på nytt, og åpne siste tur. */
+  async function etterInnlogging() {
+    let p = Api.getProfile();
+    if (!p) {
+      const navn = await Api.hentNavnFraTurer().catch(() => null);
+      if (navn) {
+        const deler = navn.split(" ");
+        p = Api.setProfile(deler[0] || navn, deler.slice(1).join(" "));
+      }
+    }
+    const turer = await Api.myTrips().catch(() => []);
+    S.trips = turer;
+    if (turer.length) {
+      await openTrip(Api.getLastTrip() && turer.some(t => t.id === Api.getLastTrip())
+        ? Api.getLastTrip() : turer[0].id);
+      toast("Velkommen tilbake.");
+    } else {
+      showJoin();
+      toast("Du er logget inn. Bli med på en tur med turkoden.");
+    }
+  }
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
@@ -1690,6 +1803,8 @@ const UI = (() => {
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "deltakere") return sheetTripMembers();
+    if (t.dataset.sheet === "logginn") return sheetEpost("logginn");
+    if (t.dataset.sheet === "koblepost") return sheetEpost("koble");
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
     if (t.dataset.sheet === "about") return sheetAbout();
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();

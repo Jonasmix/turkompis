@@ -14,7 +14,7 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<link rel="stylesheet" href="styles.css?v=32">
+<link rel="stylesheet" href="styles.css?v=33">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
       <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/><path d="M31 17 20.5 21 17 31.5 27.5 27.5 31 17Z"/></svg>
     </div>
     <h1>TourFlow</h1>
-    <p class="lede">Program, beskjeder og veibeskrivelse for klasseturen. Skriv navnet ditt og turkoden du fikk av reiselederen.</p>
+    <p class="lede">Program, beskjeder og veibeskrivelse for klasseturen. Skriv navnet ditt og turkoden du fikk av reiselederen — du kommer rett inn som gjest.</p>
 
     <form id="joinForm" novalidate>
       <div class="field">
@@ -54,6 +54,13 @@
       <button class="btn primary big" type="submit" id="joinSubmit">Bli med på turen</button>
     </form>
 
+
+    <div class="skille"><span>eller</span></div>
+
+    <p style="text-align:center;margin:0;font-size:14.5px;color:var(--ink-2)">
+      Har du brukt appen før?
+      <button type="button" class="linkbtn" data-sheet="logginn">Logg inn med e-post</button>
+    </p>
     <p style="text-align:center;margin-top:20px;font-size:14.5px;color:var(--ink-2)">
       Er du reiseleder? <button type="button" class="linkbtn" data-sheet="newtrip">Lag en ny tur</button>
     </p>
@@ -92,12 +99,12 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=32"></script>
-<script src="vendor/supabase.js?v=32"></script>
-<script src="js/templates.js?v=32"></script>
-<script src="js/api.js?v=32"></script>
-<script src="js/parse.js?v=32"></script>
-<script src="js/ui.js?v=32"></script>
+<script src="js/config.js?v=33"></script>
+<script src="vendor/supabase.js?v=33"></script>
+<script src="js/templates.js?v=33"></script>
+<script src="js/api.js?v=33"></script>
+<script src="js/parse.js?v=33"></script>
+<script src="js/ui.js?v=33"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —
