@@ -454,3 +454,67 @@ end; $$;
 
 revoke all on function public.set_member_role(uuid, uuid, text) from public;
 grant execute on function public.set_member_role(uuid, uuid, text) to authenticated;
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 06 — reaksjoner, svar og vær
+-- ═══════════════════════════════════════════════════════════════
+
+-- Hvilken melding et svar hører til. Slettes originalen, blir svaret
+-- stående som en vanlig melding i stedet for å forsvinne.
+alter table public.messages
+  add column if not exists reply_to uuid references public.messages(id) on delete set null;
+
+-- Koordinater til værmeldingen. Fylles inn av serverfunksjonen når den
+-- slår opp adressen; står de tomme, vises ingen vær for stedet.
+alter table public.places add column if not exists lat double precision;
+alter table public.places add column if not exists lon double precision;
+
+-- channel_id ligger her også, så tilgangsregelen slipper å slå opp
+-- meldingen for å finne ut hvem som får lese reaksjonen.
+create table if not exists public.reactions (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  channel_id uuid not null references public.channels(id) on delete cascade,
+  user_id    uuid not null default auth.uid(),
+  name       text not null,
+  emoji      text not null check (char_length(emoji) between 1 and 12),
+  created_at timestamptz not null default now(),
+  primary key (message_id, user_id, emoji)
+);
+create index if not exists reactions_msg_idx on public.reactions (message_id);
+
+alter table public.reactions enable row level security;
+
+drop policy if exists rea_read   on public.reactions;
+drop policy if exists rea_write  on public.reactions;
+drop policy if exists rea_delete on public.reactions;
+
+create policy rea_read on public.reactions for select using (
+  public.can_read_channel(channel_id)
+);
+create policy rea_write on public.reactions for insert with check (
+  public.can_read_channel(channel_id) and user_id = auth.uid()
+);
+create policy rea_delete on public.reactions for delete using (user_id = auth.uid());
+
+-- Mellomlager for værmeldinger, så vi ikke spør Yr på nytt for hver elev
+-- som åpner appen. Bare serverfunksjonen skriver hit.
+create table if not exists public.forecasts (
+  lat        numeric(6,3) not null,
+  lon        numeric(6,3) not null,
+  data       jsonb not null,
+  fetched_at timestamptz not null default now(),
+  primary key (lat, lon)
+);
+alter table public.forecasts enable row level security;
+drop policy if exists fc_read on public.forecasts;
+create policy fc_read on public.forecasts for select using (auth.uid() is not null);
+
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.reactions;
+  exception when duplicate_object then null;
+  end;
+end $$;
+
+notify pgrst, 'reload schema';

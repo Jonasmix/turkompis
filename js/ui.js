@@ -2,7 +2,7 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false };
+  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -119,6 +119,8 @@ const UI = (() => {
     if (!S.offline) {
       Api.subscribeTrip(tripId);
       Api.loadRecent(tripId).then(() => { if (S.tab === "chat" && !S.openChat) render(); }).catch(() => {});
+      Api.lastVaer(tripId);
+      S.svarTil = null;
     }
     Api.myTrips().then(t => { S.trips = t; }).catch(() => {});
   }
@@ -139,6 +141,35 @@ const UI = (() => {
     return forste ? { day: up, item: forste } : null;
   }
 
+
+  /* Yr svarer med koder som «partlycloudy_day». Vi viser et tegn og
+     temperaturen — ikke mer, for det skal stå ved siden av programmet
+     uten å ta oppmerksomheten fra det. */
+  function vaerTegn(kode) {
+    if (!kode) return "";
+    const k = String(kode);
+    const natt = k.endsWith("_night");
+    if (k.startsWith("clearsky")) return natt ? "🌙" : "☀️";
+    if (k.startsWith("fair")) return natt ? "🌙" : "🌤️";
+    if (k.startsWith("partlycloudy")) return "⛅";
+    if (k.startsWith("cloudy")) return "☁️";
+    if (k.includes("thunder")) return "⛈️";
+    if (k.includes("sleet")) return "🌨️";
+    if (k.includes("snow")) return "❄️";
+    if (k.includes("rain") || k.includes("shower")) return "🌧️";
+    if (k.startsWith("fog")) return "🌫️";
+    return "";
+  }
+
+  function vaerMerke(placeId, dato, tid) {
+    if (!placeId) return "";
+    const v = Api.vaerPunkt(placeId, dato, tid);
+    if (!v) return "";
+    const tegn = vaerTegn(v.sym);
+    const grader = v.temp == null ? "" : `${Math.round(v.temp)}°`;
+    if (!tegn && !grader) return "";
+    return `<span class="vaer" title="Værmelding fra Yr">${tegn}${grader ? ` <b>${grader}</b>` : ""}</span>`;
+  }
   function viewProgram() {
     const trip = S.trip;
     const leader = trip.role === "leader";
@@ -171,7 +202,7 @@ const UI = (() => {
       head = `<div class="nextup">
         <div class="lbl">${ne.day.date === today() ? "Neste i dag" : "Neste · " + esc(ne.day.label)}</div>
         <div class="t">${esc(ne.item.t)}</div>
-        <div class="w">${esc(ne.item.title)}</div>
+        <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t)}</div>
         <div class="p">${p ? esc(p.name) : esc(ne.item.note || "")}</div>
         ${p ? `<div class="acts">
           <a class="btn solid" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Veibeskrivelse</a>
@@ -192,7 +223,7 @@ const UI = (() => {
       return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
         <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
-          <div class="title">${esc(i.title)}</div>
+          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
           ${S.edit ? `<div class="redigerrad">
             <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
@@ -333,19 +364,129 @@ const UI = (() => {
       <p class="muted">En chat er enten åpen for hele turen, eller privat for dem du legger til.</p>`;
   }
 
+  const EMOJIER = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
   function viewConversation() {
     const msgs = Api.messages(S.openChat);
-    if (!msgs.length && S.loadingChat) {
-      return venter("Henter meldinger");
+    if (!msgs.length && S.loadingChat) return venter("Henter meldinger");
+    if (!msgs.length) {
+      return `<p class="muted" style="text-align:center;padding:30px 0">Ingen meldinger her ennå. Skriv den første.</p>`;
     }
-    const body = msgs.length ? msgs.map(m => `<div class="msg ${m.mine ? "me" : ""}">
+
+    const body = msgs.map(m => {
+      const svarPaa = m.replyTo ? msgs.find(x => x.id === m.replyTo) : null;
+      const rea = Api.reactions(S.openChat, m.id);
+
+      return `<div class="msg ${m.mine ? "me" : ""}" id="msg-${esc(m.id)}" data-msg="${esc(m.id)}">
         ${m.mine ? "" : `<div class="who">${esc(m.who)}${m.role ? ` <b>· ${esc(m.role)}</b>` : ""}</div>`}
+        ${m.replyTo ? `<button class="svarpaa" data-hopp="${esc(m.replyTo)}">
+            <span class="svarnavn">${esc(svarPaa ? (svarPaa.mine ? "Deg" : svarPaa.who) : "Slettet melding")}</span>
+            <span class="svartekst">${esc(svarPaa ? svarPaa.txt : "meldingen finnes ikke lenger")}</span>
+          </button>` : ""}
         <div class="bubble">${esc(m.txt)}</div>
+        ${rea.length ? `<div class="reaksjoner" data-rea="${esc(m.id)}">
+            ${rea.map(r => `<button class="rea ${r.min ? "min" : ""}" data-emoji="${esc(r.emoji)}" data-pa="${esc(m.id)}">
+              ${esc(r.emoji)}<span>${r.navn.length}</span></button>`).join("")}
+          </div>` : ""}
         <div class="stamp">${esc(dayStamp(m.ts))}${m.mine ? ` · <button class="linkbtn" style="font-size:10.5px" data-delmsg="${esc(m.id)}">slett</button>` : ""}</div>
         ${m.action ? actionCard(m.action) : ""}
-      </div>`).join("")
-      : `<p class="muted" style="text-align:center;padding:30px 0">Ingen meldinger her ennå. Skriv den første.</p>`;
+      </div>`;
+    }).join("");
+
     return `<div class="msgs" id="msgs">${body}</div>`;
+  }
+
+  /* Sveip en melding mot høyre for å svare, hold inne for å reagere.
+     Begge gestene ligger på samme element, så en bevegelse avbryter
+     holdet — ellers ville et sveip også åpnet emojivelgeren. */
+  function settOppMeldingsgester() {
+    const boks = $("screen").querySelector(".msgs");
+    if (!boks) return;
+
+    let rad = null, startX = 0, startY = 0, holder = null, sveiper = false;
+
+    const avbrytHold = () => { clearTimeout(holder); holder = null; };
+
+    boks.addEventListener("pointerdown", e => {
+      if (e.target.closest("button, a")) return;
+      rad = e.target.closest(".msg");
+      if (!rad) return;
+      startX = e.clientX; startY = e.clientY; sveiper = false;
+      holder = setTimeout(() => {
+        holder = null;
+        rad.classList.remove("sveiper");
+        rad.style.transform = "";
+        const id = rad.dataset.msg;
+        rad = null;
+        if (navigator.vibrate) navigator.vibrate(12);
+        sheetEmoji(id);
+      }, 450);
+    });
+
+    boks.addEventListener("pointermove", e => {
+      if (!rad) return;
+      const dx = e.clientX - startX, dy = Math.abs(e.clientY - startY);
+      if (!sveiper) {
+        if (Math.abs(dx) > 8 || dy > 8) avbrytHold();
+        if (dx > 12 && dy < 26) { sveiper = true; rad.classList.add("sveiper"); }
+        else return;
+      }
+      e.preventDefault();
+      rad.style.transform = `translateX(${Math.min(Math.max(dx, 0), 90)}px)`;
+    }, { passive: false });
+
+    function slipp() {
+      avbrytHold();
+      if (!rad) return;
+      const dx = Number((rad.style.transform.match(/translateX\((\d+(?:\.\d+)?)px\)/) || [0, 0])[1]);
+      rad.classList.remove("sveiper");
+      rad.style.transform = "";
+      const id = rad.dataset.msg;
+      rad = null;
+      if (sveiper && dx > 55) startSvar(id);
+    }
+    boks.addEventListener("pointerup", slipp);
+    boks.addEventListener("pointercancel", slipp);
+  }
+
+  function startSvar(id) {
+    const m = Api.messages(S.openChat).find(x => x.id === id);
+    if (!m) return;
+    S.svarTil = { id: m.id, who: m.mine ? "deg selv" : m.who, txt: m.txt };
+    render();
+    const inn = $("msgInput");
+    if (inn) inn.focus();
+  }
+
+  function hoppTil(id) {
+    const el = document.getElementById("msg-" + id);
+    if (!el) return toast("Meldingen finnes ikke lenger.");
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("blink");
+    void el.offsetWidth;            // start animasjonen på nytt
+    el.classList.add("blink");
+  }
+
+  function sheetEmoji(id) {
+    const m = Api.messages(S.openChat).find(x => x.id === id);
+    const rea = Api.reactions(S.openChat, id);
+    openSheet(`<h3>Reager</h3>
+      ${m ? `<p class="muted" style="margin:6px 0 14px">${esc(m.txt.slice(0, 90))}${m.txt.length > 90 ? "…" : ""}</p>` : ""}
+      <div class="emojirad">
+        ${EMOJIER.map(e => `<button class="emojiknapp" data-emoji="${e}" data-pa="${esc(id)}">${e}</button>`).join("")}
+      </div>
+      ${rea.length ? `<div class="eyebrow" style="margin:18px 0 8px">Hvem har reagert</div>
+        <div class="memberlist">${rea.map(r => `<div class="person">
+          <span>${esc(r.emoji)} ${esc(r.navn.join(", "))}</span></div>`).join("")}</div>` : ""}
+      <button class="btn" style="width:100%;margin-top:14px" data-svar="${esc(id)}">Svar på meldingen</button>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
+  async function reager(id, emoji) {
+    try {
+      await Api.toggleReaction(S.openChat, id, emoji);
+      render();
+    } catch { toast("Klarte ikke lagre reaksjonen."); }
   }
 
   function viewChat() {
@@ -429,11 +570,22 @@ const UI = (() => {
 
     const slot = $("composerSlot");
     if (conv && !S.offline) {
-      slot.innerHTML = `<form class="composer" id="composer">
-        <input id="msgInput" placeholder="Melding til ${esc(conv.name)}…" autocomplete="off" enterkeyhint="send" maxlength="2000">
-        <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
-      </form>`;
+      slot.innerHTML = `
+        ${S.svarTil ? `<div class="svarforhaand">
+          <div class="svarinfo">
+            <b>Svarer ${esc(S.svarTil.who)}</b>
+            <span>${esc(S.svarTil.txt.slice(0, 80))}${S.svarTil.txt.length > 80 ? "…" : ""}</span>
+          </div>
+          <button class="minibtn" id="avbrytSvar" aria-label="Avbryt svaret">✕</button>
+        </div>` : ""}
+        <form class="composer" id="composer">
+          <input id="msgInput" placeholder="${S.svarTil ? "Skriv svaret…" : "Melding til " + esc(conv.name) + "…"}" autocomplete="off" enterkeyhint="send" maxlength="2000">
+          <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
+        </form>`;
       $("composer").addEventListener("submit", onSend);
+      const avbryt = $("avbrytSvar");
+      if (avbryt) avbryt.addEventListener("click", () => { S.svarTil = null; render(); });
+      settOppMeldingsgester();
       const sc = $("screen"); sc.scrollTop = sc.scrollHeight;
     } else slot.innerHTML = "";
 
@@ -494,7 +646,8 @@ const UI = (() => {
     inp.value = "";
     const action = Parse.analyse(S.trip, txt);
     try {
-      await Api.sendMessage(S.trip.id, S.openChat, txt, action);
+      await Api.sendMessage(S.trip.id, S.openChat, txt, action, S.svarTil ? S.svarTil.id : null);
+      S.svarTil = null;
       render();
     } catch (err) {
       inp.value = txt;
@@ -1312,7 +1465,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -1381,6 +1534,9 @@ const UI = (() => {
 
     // ark
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
+    if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
+    if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
+    if (t.dataset.svar) { closeSheet(); return startSvar(t.dataset.svar); }
     if (t.dataset.item) return sheetItem(t.dataset.item);
     if (t.dataset.kopi) {
       try { await navigator.clipboard.writeText(t.dataset.kopi); toast("Kopiert: " + t.dataset.kopi); }

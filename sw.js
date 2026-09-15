@@ -5,7 +5,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 22;
+const BUILD = 23;
 const CACHE = "turkompis-b" + BUILD;
 
 const SHELL = [

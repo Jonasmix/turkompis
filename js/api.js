@@ -11,7 +11,7 @@ const Api = (() => {
   let sb = null;                 // Supabase-klienten
   let userId = null;
   let liveSub = null;            // abonnement på nye meldinger
-  const cache = { trip: null, messages: {}, recent: {} };
+  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {} };
   const listeners = new Set();
 
   const LS = {
@@ -247,18 +247,65 @@ const Api = (() => {
 
   async function loadMessages(tripId, channelId) {
     if (!online()) return messages(channelId);
-    const { data, error } = await sb
-      .from("messages").select("*")
-      .eq("channel_id", channelId).order("created_at").limit(300);
-    if (error) throw error;
-    cache.messages[channelId] = (data || []).map(shape);
+    const [m, r] = await Promise.all([
+      sb.from("messages").select("*").eq("channel_id", channelId).order("created_at").limit(300),
+      sb.from("reactions").select("*").eq("channel_id", channelId)
+    ]);
+    if (m.error) throw m.error;
+    cache.messages[channelId] = (m.data || []).map(shape);
+    cache.reactions[channelId] = r.error ? [] : (r.data || []);
     return cache.messages[channelId];
   }
 
   const shape = m => ({
     id: m.id, who: m.author_name, role: m.role, txt: m.txt,
-    ts: m.created_at, action: m.action || null, mine: m.author_id === userId
+    ts: m.created_at, action: m.action || null, mine: m.author_id === userId,
+    replyTo: m.reply_to || null
   });
+
+  /* ───────── reaksjoner ───────── */
+  /* Samlet per melding: hvilken emoji, hvor mange, hvem — og om du selv
+     har gitt den, så trykket kan slå den av igjen. */
+  function reactions(channelId, messageId) {
+    const alle = (cache.reactions[channelId] || []).filter(r => r.message_id === messageId);
+    const grupper = {};
+    for (const r of alle) {
+      const g = grupper[r.emoji] || (grupper[r.emoji] = { emoji: r.emoji, navn: [], min: false });
+      g.navn.push(r.name);
+      if (r.user_id === userId) g.min = true;
+    }
+    return Object.values(grupper);
+  }
+
+  async function toggleReaction(channelId, messageId, emoji) {
+    const p = getProfile();
+    const liste = cache.reactions[channelId] || (cache.reactions[channelId] = []);
+    const finnes = liste.find(r => r.message_id === messageId && r.user_id === userId && r.emoji === emoji);
+
+    if (finnes) {
+      liste.splice(liste.indexOf(finnes), 1);
+      const { error } = await sb.from("reactions").delete()
+        .eq("message_id", messageId).eq("user_id", userId).eq("emoji", emoji);
+      if (error) throw error;
+      return;
+    }
+
+    const rad = {
+      message_id: messageId, channel_id: channelId,
+      name: p ? p.name : "Ukjent", emoji
+    };
+    liste.push({ ...rad, user_id: userId });
+    const { error } = await sb.from("reactions").insert(rad);
+    if (error) {
+      liste.pop();
+      throw error;
+    }
+  }
+
+  async function lastReaksjoner(channelId) {
+    const { data, error } = await sb.from("reactions").select("*").eq("channel_id", channelId);
+    if (!error) cache.reactions[channelId] = data || [];
+  }
 
   /* Ett abonnement for hele turen, ikke ett per chat: da oppdateres både
      chatlista og den samtalen som står åpen. Radsikkerheten sørger for at
@@ -289,19 +336,36 @@ const Api = (() => {
             const i = list.findIndex(m => m.id === payload.old.id);
             if (i > -1) { list.splice(i, 1); fire(); }
           })
+      .on("postgres_changes",
+          { event: "*", schema: "public", table: "reactions" },
+          nyttOmReaksjon)
       .subscribe();
   }
 
-  async function sendMessage(tripId, channelId, txt, action) {
+  /* Reaksjoner har ingen tur-kolonne aa filtrere paa, saa vi henter dem
+     paa nytt for den chatten som staar aapen og lar resten ligge. */
+  function nyttOmReaksjon(payload) {
+    const kanal = (payload.new && payload.new.channel_id) || (payload.old && payload.old.channel_id);
+    if (!kanal || !cache.reactions[kanal]) return;
+    lastReaksjoner(kanal).then(fire).catch(() => {});
+  }
+
+  async function sendMessage(tripId, channelId, txt, action, replyTo) {
     const p = getProfile();
     const row = {
       trip_id: tripId, channel_id: channelId,
       author_name: p ? p.name : "Ukjent",
       role: isLeader() ? "Reiseleder" : "",
-      txt, action: action || null
+      txt, action: action || null, reply_to: replyTo || null
     };
-    const { data, error } = await sb.from("messages").insert(row).select().single();
-    if (error) throw error;
+    let svar = await sb.from("messages").insert(row).select().single();
+    // Er ikke svar-kolonnen lagt til enda, send meldingen som en vanlig en.
+    if (svar.error && /reply_to/.test(svar.error.message || "")) {
+      const { reply_to, ...utenSvar } = row;
+      svar = await sb.from("messages").insert(utenSvar).select().single();
+    }
+    if (svar.error) throw svar.error;
+    const data = svar.data;
     const list = cache.messages[channelId] || (cache.messages[channelId] = []);
     if (!list.some(m => m.id === data.id)) { list.push(shape(data)); }
     cache.recent[channelId] = { txt: data.txt, who: data.author_name, ts: data.created_at, mine: true };
@@ -492,6 +556,49 @@ const Api = (() => {
     return svar;
   }
 
+
+  /* ───────── vær ───────── */
+  /* Serveren henter fra Yr og mellomlagrer. Feiler det, viser appen
+     ingenting — heller ingen værmelding enn feil værmelding. */
+  function vaerFor(placeId) { return cache.vaer[placeId] || null; }
+
+  async function lastVaer(tripId) {
+    if (!online()) return;
+    try {
+      const { data } = await sb.auth.getSession();
+      if (!data.session) return;
+      const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/vaer", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + data.session.access_token,
+          "apikey": CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ tripId })
+      });
+      if (!res.ok) return;
+      const svar = await res.json();
+      cache.vaer = svar.vaer || {};
+      fire();
+    } catch { /* uten vær går appen like fint */ }
+  }
+
+  /* Nærmeste times varsel for et sted på et gitt tidspunkt. */
+  function vaerPunkt(placeId, dato, tid) {
+    const v = cache.vaer[placeId];
+    if (!v || !v.timer || !v.timer.length) return null;
+    const maal = new Date(`${dato}T${tid || "12:00"}:00`).getTime();
+    if (isNaN(maal)) return null;
+
+    let best = null, avstand = Infinity;
+    for (const t of v.timer) {
+      const d = Math.abs(new Date(t.t).getTime() - maal);
+      if (d < avstand) { avstand = d; best = t; }
+    }
+    // Yr rekker omtrent ni dager fram. Er punktet lenger unna, si heller ingenting.
+    if (!best || avstand > 3 * 3600 * 1000) return null;
+    return best;
+  }
   function signOutLocal() {
     Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
     if (sb) sb.auth.signOut().catch(() => {});
@@ -502,6 +609,7 @@ const Api = (() => {
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
+    reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     addPlace, updatePlace, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal
