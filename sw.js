@@ -1,7 +1,7 @@
 /* sw.js — gjør appen tilgjengelig uten nett.
    Bump CACHE når filene endres, ellers får folk den gamle versjonen. */
 
-const CACHE = "turkompis-v3";
+const CACHE = "turkompis-v4";
 const SHELL = [
   "./",
   "index.html",
