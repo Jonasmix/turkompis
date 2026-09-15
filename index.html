@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Turkompis</title>
+<meta name="description" content="Program, gruppechat og veibeskrivelse for klasseturen.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#14508C" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B1117" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Turkompis">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ JOIN ============ -->
+<section id="joinScreen" class="join" hidden>
+  <div class="join-inner">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/><path d="M31 17 20.5 21 17 31.5 27.5 27.5 31 17Z"/></svg>
+    </div>
+    <h1>Turkompis</h1>
+    <p class="lede">Program, beskjeder og veibeskrivelse for klasseturen. Skriv navnet ditt og turkoden du fikk av reiselederen.</p>
+
+    <form id="joinForm" novalidate>
+      <div class="field">
+        <label for="fFirst">Fornavn</label>
+        <input id="fFirst" name="first" autocomplete="given-name" required>
+      </div>
+      <div class="field">
+        <label for="fLast">Etternavn</label>
+        <input id="fLast" name="last" autocomplete="family-name" required>
+      </div>
+      <div class="field">
+        <label for="fCode">Turkode</label>
+        <input id="fCode" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="F.EKS. BERLIN26" required>
+      </div>
+      <p class="err" id="joinErr" role="alert" hidden></p>
+      <button class="btn primary big" type="submit">Bli med på turen</button>
+    </form>
+
+    <p class="demohint">Prøvekoder mens vi tester: <button type="button" class="linkbtn" data-fill="BERLIN26">BERLIN26</button> og <button type="button" class="linkbtn" data-fill="PARIS26">PARIS26</button></p>
+  </div>
+</section>
+
+<!-- ============ APP ============ -->
+<section id="appScreen" class="app" hidden>
+  <header class="apphead">
+    <button class="tripbtn" id="tripBtn" aria-haspopup="dialog">
+      <span class="tripname" id="tripName">—</span>
+      <span class="tripsub" id="tripSub">—</span>
+    </button>
+    <button class="avatar" id="meBtn" aria-label="Din profil"><span id="avatarText">–</span></button>
+  </header>
+
+  <main class="screen" id="screen" tabindex="-1"></main>
+
+  <div id="composerSlot"></div>
+
+  <nav class="tabbar" id="tabbar" role="tablist" aria-label="Hovedmeny"></nav>
+</section>
+
+<!-- ============ SHEET ============ -->
+<div class="sheet-bg" id="sheetBg" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="js/data.js"></script>
+<script src="js/store.js"></script>
+<script src="js/parse.js"></script>
+<script src="js/ui.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
