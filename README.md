@@ -98,3 +98,16 @@ API-et møter de samme reglene.
   trenger databehandleravtale med Supabase, og en personvernkonsekvensvurdering (DPIA) er
   sannsynligvis påkrevd før ekte bruk.
 - **Filopplasting** er ikke bygget. Program legges inn manuelt.
+
+## Når du har endret noe
+
+Appen ligger i offline-lageret på folks telefoner, og nettleseren har sitt eget mellomlager
+i tillegg. Begge må brytes, ellers ser folk den gamle versjonen i timevis.
+
+Bump derfor **to tall til samme verdi** for hver utrulling:
+
+1. `?v=` på alle `<script>` og `<link>` i `index.html`
+2. `const BUILD` øverst i `sw.js`
+
+Nye filadresser går utenom begge lagrene. Service workeren henter dessuten siden ferskt ved
+hver navigasjon, og `index.html` laster seg selv på nytt én gang når en ny versjon tar over.

@@ -1,32 +1,35 @@
-/* sw.js — gjør appen tilgjengelig uten nett.
+/* sw.js — gjør appen tilgjengelig uten nett, og sørger for at en ny
+   utgave faktisk når fram.
 
-   Strategi: svar fra lageret med én gang, men hent alltid ny versjon i
-   bakgrunnen og legg den i lageret. Da er appen rask og virker offline,
-   samtidig som en ny utgave aldri blir hengende igjen. Sammen med
-   controllerchange-lytteren i index.html laster siden seg selv på nytt
-   når en ny versjon har tatt over. */
+   BUILD må være det samme tallet som ?v= i index.html. Bump begge når du
+   endrer noe, så får alle den nye versjonen: nye filadresser går utenom
+   både service workeren og nettleserens eget mellomlager. */
 
-const CACHE = "turkompis-v7";
+const BUILD = 8;
+const CACHE = "turkompis-b" + BUILD;
+
 const SHELL = [
   "./",
   "index.html",
-  "styles.css",
-  "vendor/supabase.js",
-  "js/config.js",
-  "js/templates.js",
-  "js/api.js",
-  "js/parse.js",
-  "js/ui.js",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",
-  "icons/icon-180.png"
+  "icons/icon-180.png",
+  "styles.css?v=" + BUILD,
+  "vendor/supabase.js?v=" + BUILD,
+  "js/config.js?v=" + BUILD,
+  "js/templates.js?v=" + BUILD,
+  "js/api.js?v=" + BUILD,
+  "js/parse.js?v=" + BUILD,
+  "js/ui.js?v=" + BUILD
 ];
 
 self.addEventListener("install", e => {
   e.waitUntil(
     caches.open(CACHE)
-      .then(c => Promise.allSettled(SHELL.map(u => c.add(u))))
+      .then(c => Promise.allSettled(
+        SHELL.map(u => c.add(new Request(u, { cache: "reload" })))
+      ))
       .then(() => self.skipWaiting())
   );
 });
@@ -43,10 +46,11 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
 
-  // Sidenavigasjon: nett først, lagret skall som reserve.
+  // Selve siden hentes alltid ferskt, utenom nettleserens mellomlager.
+  // Uten cache:"reload" kan en gammel index.html bli liggende i timevis.
   if (req.mode === "navigate") {
     e.respondWith(
-      fetch(req)
+      fetch(new Request(req.url, { cache: "reload" }))
         .catch(() => caches.match("index.html", { ignoreSearch: true }))
         .then(r => r || caches.match("./"))
     );
@@ -63,7 +67,7 @@ self.addEventListener("fetch", e => {
           if (res && res.ok) cache.put(req, res.clone());
           return res;
         }).catch(() => hit);
-        return hit || nett;   // lagret svar nå, ny versjon til neste gang
+        return hit || nett;
       })
     )
   );
