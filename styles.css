@@ -439,3 +439,16 @@ label.person span{flex:1;min-width:0}
 .skille{display:flex;align-items:center;gap:12px;margin:22px 0;color:var(--ink-3);
   font-family:"Archivo",sans-serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase}
 .skille::before,.skille::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* Innloggingssiden */
+.tilbake{
+  display:inline-flex;align-items:center;gap:5px;background:none;border:0;cursor:pointer;
+  color:var(--ink-2);font-family:"Archivo",sans-serif;font-weight:600;font-size:13.5px;
+  padding:8px 10px 8px 0;margin-bottom:10px;min-height:40px;
+}
+.kodefelt{
+  width:100%;border:1px solid var(--line);background:var(--surface);border-radius:11px;
+  padding:14px;font-size:24px;min-height:56px;text-align:center;
+  font-family:"IBM Plex Mono",monospace;letter-spacing:.35em;
+}
+#authScreen .lede{margin-bottom:22px}

@@ -37,6 +37,7 @@ const UI = (() => {
     prog:'<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/><circle cx="14" cy="18" r="2"/></svg>',
     me:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
     send:'<svg viewBox="0 0 24 24"><path d="M4 12 20 4l-7 16-2-7-7-1Z"/></svg>',
+    chevL:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="m15 6-6 6 6 6"/></svg>',
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
   };
 
@@ -1590,35 +1591,44 @@ const UI = (() => {
       $("tmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
     }
   }
-
-  /* ───────────────── e-post ─────────────────
-     To bruk: logge inn på nytt, eller knytte e-post til gjestekontoen
-     man alt har. Begge går i to steg — adresse, så kode fra e-posten. */
-  function sheetEpost(modus) {
+  /* ───────────────── innlogging med e-post ─────────────────
+     Egen side, ikke et ark: skjemaet er kort, men tastaturet tar halve
+     skjermen på telefon, og i et ark ble overskriften liggende under
+     draghåndtaket. */
+  function visAuth(modus) {
     const kobler = modus === "koble";
     const harAlt = kobler && !Api.erAnonym();
-    openSheet(`<h3>${harAlt ? "Bytt e-postadresse" : kobler ? "Sikre kontoen med e-post" : "Logg inn med e-post"}</h3>
-      <p class="muted" style="margin:6px 0 14px">
-        ${harAlt
-          ? `Du er innlogget som <b>${esc(Api.minEpost() || "")}</b>. Skriv den nye adressen, så sender vi en kode dit.`
-          : kobler
-          ? "Du beholder turene og rollene dine. Med e-post kan du logge inn på en annen telefon, og du mister ikke alt hvis denne blir borte."
-          : "Vi sender en sekssifret kode. Ingen passord å huske."}</p>
-      <form id="epostForm">
+
+    $("joinScreen").hidden = true;
+    $("appScreen").hidden = true;
+    $("bootScreen").hidden = true;
+    $("authScreen").hidden = false;
+
+    $("authInner").innerHTML = `
+      <button class="tilbake" id="authTilbake">${ICON.chevL} Tilbake</button>
+      <h1>${harAlt ? "Bytt e-postadresse" : kobler ? "Sikre kontoen" : "Logg inn"}</h1>
+      <p class="lede">${harAlt
+        ? `Du er innlogget som <b>${esc(Api.minEpost() || "")}</b>. Skriv den nye adressen, så sender vi en kode dit.`
+        : kobler
+        ? "Du beholder turene og rollene dine. Med e-post kan du logge inn på en annen telefon, og mister ikke alt om denne blir borte."
+        : "Vi sender en sekssifret kode. Ingen passord å huske."}</p>
+
+      <form id="authForm" novalidate>
         <div class="field">
-          <label for="ePost">E-post</label>
-          <input id="ePost" type="email" inputmode="email" autocomplete="email"
+          <label for="aPost">E-post</label>
+          <input id="aPost" type="email" inputmode="email" autocomplete="email"
                  autocapitalize="none" spellcheck="false" placeholder="navn@eksempel.no">
         </div>
-        <p class="err" id="eFeil" hidden></p>
-        <button class="btn primary big" type="submit" id="eSend">Send kode</button>
-      </form>
-      <button class="btn close" data-close>Avbryt</button>`);
+        <p class="err" id="aFeil" hidden></p>
+        <button class="btn primary big" type="submit" id="aSend">Send kode</button>
+      </form>`;
 
-    $("epostForm").addEventListener("submit", async e => {
+    setTimeout(() => $("aPost") && $("aPost").focus(), 100);
+
+    $("authForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const epost = $("ePost").value.trim();
-      const feil = $("eFeil"), knapp = $("eSend");
+      const epost = $("aPost").value.trim();
+      const feil = $("aFeil"), knapp = $("aSend");
       if (!epost.includes("@") || !epost.includes(".")) {
         feil.textContent = "Skriv en gyldig e-postadresse."; feil.hidden = false; return;
       }
@@ -1627,7 +1637,7 @@ const UI = (() => {
       try {
         if (kobler) await Api.koblePaaEpost(epost);
         else await Api.sendKode(epost);
-        sheetKode(epost, kobler);
+        visAuthKode(epost, kobler);
       } catch (e2) {
         knapp.disabled = false; knapp.textContent = "Send kode";
         feil.textContent = e2.message; feil.hidden = false;
@@ -1635,28 +1645,28 @@ const UI = (() => {
     });
   }
 
-  function sheetKode(epost, kobler) {
-    openSheet(`<h3>Sjekk e-posten</h3>
-      <p class="muted" style="margin:6px 0 14px">
-        Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.
+  function visAuthKode(epost, kobler) {
+    $("authInner").innerHTML = `
+      <button class="tilbake" id="authTilbake">${ICON.chevL} Bruk en annen adresse</button>
+      <h1>Sjekk e-posten</h1>
+      <p class="lede">Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.
         Finner du den ikke, se i søppelpost.</p>
-      <form id="kodeForm">
+
+      <form id="kodeForm" novalidate>
         <div class="field">
-          <label for="eKode">Kode</label>
-          <input id="eKode" inputmode="numeric" autocomplete="one-time-code"
-                 maxlength="8" class="mono" style="font-size:22px;letter-spacing:.3em" placeholder="000000">
+          <label for="aKode">Kode</label>
+          <input id="aKode" inputmode="numeric" autocomplete="one-time-code" maxlength="8"
+                 class="kodefelt" placeholder="000000">
         </div>
         <p class="err" id="kFeil" hidden></p>
         <button class="btn primary big" type="submit" id="kSend">Logg inn</button>
-      </form>
-      <button class="btn" style="width:100%;margin-top:10px" data-sheet="${kobler ? "koblepost" : "logginn"}">Bruk en annen adresse</button>
-      <button class="btn close" data-close>Avbryt</button>`);
+      </form>`;
 
-    setTimeout(() => { const f = $("eKode"); if (f) f.focus(); }, 150);
+    setTimeout(() => $("aKode") && $("aKode").focus(), 100);
 
     $("kodeForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const kode = $("eKode").value.trim();
+      const kode = $("aKode").value.trim();
       const feil = $("kFeil"), knapp = $("kSend");
       if (kode.length < 6) { feil.textContent = "Koden er seks siffer."; feil.hidden = false; return; }
       feil.hidden = true;
@@ -1664,12 +1674,11 @@ const UI = (() => {
       try {
         if (kobler) {
           await Api.bekreftKobling(epost, kode);
-          closeSheet();
-          render();
+          lukkAuth();
           toast("Kontoen er sikret med " + epost);
         } else {
           await Api.bekreftKode(epost, kode);
-          closeSheet();
+          $("authScreen").hidden = true;
           await etterInnlogging();
         }
       } catch (e2) {
@@ -1679,8 +1688,13 @@ const UI = (() => {
     });
   }
 
-  /* Etter innlogging på en ny telefon: hent navnet fra turene i stedet
-     for å spørre om det på nytt, og åpne siste tur. */
+  /* Tilbake dit man kom fra: appen om man er inne i en tur, ellers join. */
+  function lukkAuth() {
+    $("authScreen").hidden = true;
+    if (S.trip) { $("appScreen").hidden = false; render(); }
+    else showJoin();
+  }
+
   async function etterInnlogging() {
     let p = Api.getProfile();
     if (!p) {
@@ -1721,9 +1735,13 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],#authTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
+    if (t.id === "authTilbake") {
+      // Paa kodesteget betyr tilbake "bruk en annen adresse", ikke ut.
+      return $("authInner").querySelector("#kodeForm") ? visAuth(S.trip && !Api.erAnonym() ? "koble" : "logginn") : lukkAuth();
+    }
     if (t.hasAttribute("data-close")) return closeSheet();
     if (t.id === "backBtn") return closeChat();
     if (t.id === "tripBtn") return sheetTrips();
@@ -1809,8 +1827,8 @@ const UI = (() => {
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "deltakere") return sheetTripMembers();
-    if (t.dataset.sheet === "logginn") return sheetEpost("logginn");
-    if (t.dataset.sheet === "koblepost") return sheetEpost("koble");
+    if (t.dataset.sheet === "logginn") return visAuth("logginn");
+    if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
     if (t.dataset.sheet === "about") return sheetAbout();
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();
