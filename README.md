@@ -10,13 +10,15 @@ Pages, med Supabase som database.
   turkode på seks tegn å dele ut.
 - **Deltakere blir med** med fornavn, etternavn og turkoden.
 - **Flere turer.** Appen husker hvilken tur du så sist og åpner den neste gang.
-- **Flere chatter per tur** — hele turen, gruppechatter, reiseledere. Alle medlemmer kan
-  opprette en gruppechat.
+- **Flere chatter per tur.** En chat er enten åpen for hele turen, eller privat for dem du
+  legger til. Private chatter vises ikke i det hele tatt for andre — heller ikke for
+  reiseledere. Alle medlemmer kan opprette en chat og legge til folk som er med på turen.
 - **Møteavtaler blir til veibeskrivelse.** Skriver noen «møt på hotellet kl 18:30», kobles
   det mot programmet for den dagen, og kartet åpner riktig adresse. «Hotellet» slår opp
   hotellet dere faktisk bor på den datoen — turer bytter hotell underveis.
 - **Program** med dagsvelger, neste hendelse, og kart på hvert punkt. Reiseleder legger inn
   dager, punkter, steder og hvilket hotell som gjelder hver dag.
+- **Lys visning.** Appen er lys uansett hva telefonen står på.
 - **Offline** — appen caches, og siste turdata vises selv uten nett. Meldinger krever nett.
 
 ## Sett opp databasen
@@ -75,6 +77,8 @@ API-et møter de samme reglene.
   gjennom `join_trip()`, som er den eneste veien inn.
 - **Roller.** Bare reiseledere endrer program, steder, dager og hotell. Alle medlemmer kan
   skrive meldinger og lage gruppechatter.
+- **Private chatter er private.** Tilgang følger chatten, ikke turen. En privat chat og
+  meldingene i den er usynlige for alle som ikke er lagt til — reiseledere inkludert.
 - **Meldinger** skrives i eget navn — `author_id` må være din egen bruker. Du kan slette
   dine egne; reiseleder kan slette alle.
 - **Anonym pålogging** gir hver enhet en identitet. Ingen passord å miste.

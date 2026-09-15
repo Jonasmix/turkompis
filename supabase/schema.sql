@@ -243,3 +243,143 @@ begin
   exception when duplicate_object then null;
   end;
 end $$;
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 02 — private gruppechatter
+--  En chat er enten åpen for hele turen, eller privat for dem som
+--  er lagt til. Private chatter er private også for reiseledere.
+-- ═══════════════════════════════════════════════════════════════
+
+alter table public.channels
+  add column if not exists private boolean not null default false;
+
+create table if not exists public.channel_members (
+  channel_id uuid not null references public.channels(id) on delete cascade,
+  user_id    uuid not null,
+  added_at   timestamptz not null default now(),
+  primary key (channel_id, user_id)
+);
+
+create index if not exists channel_members_user_idx on public.channel_members (user_id);
+
+alter table public.channel_members enable row level security;
+
+-- Er jeg med i denne chatten? Security definer for å unngå at en regel
+-- på channel_members må spørre i channel_members.
+create or replace function public.in_channel(p_channel uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.channel_members
+    where channel_id = p_channel and user_id = auth.uid()
+  );
+$$;
+
+-- Får jeg lese denne chatten? Åpen chat: alle på turen. Privat: bare medlemmer.
+create or replace function public.can_read_channel(p_channel uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.channels c
+    where c.id = p_channel
+      and public.is_trip_member(c.trip_id)
+      and (
+        c.private = false
+        or exists (select 1 from public.channel_members m
+                   where m.channel_id = c.id and m.user_id = auth.uid())
+      )
+  );
+$$;
+
+drop policy if exists ch_read      on public.channels;
+drop policy if exists ch_create    on public.channels;
+drop policy if exists ch_manage    on public.channels;
+drop policy if exists cm_read      on public.channel_members;
+drop policy if exists cm_remove    on public.channel_members;
+drop policy if exists msg_read     on public.messages;
+drop policy if exists msg_write    on public.messages;
+drop policy if exists msg_delete   on public.messages;
+
+-- Private chatter dukker ikke engang opp i lista for andre.
+create policy ch_read on public.channels for select using (
+  public.is_trip_member(trip_id) and (private = false or public.in_channel(id))
+);
+-- Oppretting går gjennom create_channel(); sletting er for den som laget
+-- chatten, eller for reiseleder når chatten er åpen.
+create policy ch_manage on public.channels for delete using (
+  created_by = auth.uid() or (private = false and public.is_trip_leader(trip_id))
+);
+
+-- Deltakerlista i en chat ser du bare hvis du får lese chatten.
+create policy cm_read on public.channel_members for select using (
+  public.can_read_channel(channel_id)
+);
+-- Du kan gå ut selv, eller fjerne noen fra en chat du selv er med i.
+create policy cm_remove on public.channel_members for delete using (
+  user_id = auth.uid() or public.in_channel(channel_id)
+);
+
+-- Meldinger følger chatten, ikke turen.
+create policy msg_read on public.messages for select using (
+  public.can_read_channel(channel_id)
+);
+create policy msg_write on public.messages for insert with check (
+  public.can_read_channel(channel_id) and author_id = auth.uid()
+);
+-- Reiseleder kan rydde i chatter hen faktisk har tilgang til — ikke i private.
+create policy msg_delete on public.messages for delete using (
+  author_id = auth.uid()
+  or (public.is_trip_leader(trip_id) and public.can_read_channel(channel_id))
+);
+
+-- Lag chat, og legg inn deltakerne i samme operasjon.
+create or replace function public.create_channel(
+  p_trip uuid, p_name text, p_sub text, p_private boolean, p_members uuid[]
+) returns public.channels language plpgsql security definer set search_path = public as $$
+declare c public.channels; u uuid;
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  if not public.is_trip_member(p_trip) then raise exception 'ikke_medlem'; end if;
+  if coalesce(trim(p_name), '') = '' then raise exception 'mangler_navn'; end if;
+
+  insert into public.channels (trip_id, name, sub, private, created_by)
+  values (p_trip, trim(p_name), coalesce(trim(p_sub), ''), coalesce(p_private, false), auth.uid())
+  returning * into c;
+
+  -- Den som lager chatten er alltid med.
+  insert into public.channel_members (channel_id, user_id) values (c.id, auth.uid());
+
+  -- Bare folk som faktisk er med på turen kan legges til.
+  foreach u in array coalesce(p_members, '{}'::uuid[]) loop
+    if exists (select 1 from public.members where trip_id = p_trip and user_id = u) then
+      insert into public.channel_members (channel_id, user_id)
+      values (c.id, u) on conflict do nothing;
+    end if;
+  end loop;
+
+  return c;
+end; $$;
+
+-- Legg til én deltaker i en chat du selv er med i.
+create or replace function public.add_channel_member(p_channel uuid, p_user uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare v_trip uuid;
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  select trip_id into v_trip from public.channels where id = p_channel;
+  if v_trip is null then raise exception 'ukjent_chat'; end if;
+  if not public.can_read_channel(p_channel) then raise exception 'ingen_tilgang'; end if;
+  if not exists (select 1 from public.members where trip_id = v_trip and user_id = p_user) then
+    raise exception 'ikke_paa_turen';
+  end if;
+
+  insert into public.channel_members (channel_id, user_id)
+  values (p_channel, p_user) on conflict do nothing;
+  return true;
+end; $$;
+
+revoke all on function public.create_channel(uuid, text, text, boolean, uuid[]) from public;
+revoke all on function public.add_channel_member(uuid, uuid) from public;
+grant execute on function public.create_channel(uuid, text, text, boolean, uuid[]) to authenticated;
+grant execute on function public.add_channel_member(uuid, uuid) to authenticated;
+
+-- Chatter som fantes før denne utvidelsen er åpne for hele turen.
+update public.channels set private = false where private is null;

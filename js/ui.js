@@ -225,7 +225,7 @@ const UI = (() => {
 
   function viewChat() {
     const chips = S.trip.channels.map(c =>
-      `<button class="chip" aria-pressed="${c.id === S.channel}" data-channel="${esc(c.id)}">${esc(c.name)}<span>${esc(c.sub || "")}</span></button>`
+      `<button class="chip" aria-pressed="${c.id === S.channel}" data-channel="${esc(c.id)}">${c.private ? "&#128274; " : ""}${esc(c.name)}<span>${esc(c.sub || (c.private ? "privat" : ""))}</span></button>`
     ).join("") + `<button class="chip" data-sheet="newchannel" style="border-style:dashed">+ Ny chat<span>i denne turen</span></button>`;
 
     if (!S.channel) {
@@ -242,7 +242,13 @@ const UI = (() => {
       </div>`).join("")
       : `<p class="muted" style="text-align:center;padding:30px 0">Ingen meldinger her ennå. Skriv den første.</p>`;
 
-    return `<div class="chips">${chips}</div><div class="msgs" id="msgs">${body}</div>`;
+    const ch = S.trip.channels.find(c => c.id === S.channel);
+    const bar = `<div class="chanbar">
+      <span>${ch && ch.private ? "&#128274; Privat — bare de som er lagt til" : "Åpen for alle på turen"}</span>
+      <button class="linkbtn" data-members="${esc(S.channel)}">Deltakere</button>
+    </div>`;
+
+    return `<div class="chips">${chips}</div>${bar}<div class="msgs" id="msgs">${body}</div>`;
   }
 
   /* ───────────────── meg ───────────────── */
@@ -462,26 +468,140 @@ const UI = (() => {
     });
   }
 
-  function sheetNewChannel() {
+  async function sheetNewChannel() {
     openSheet(`<h3>Ny chat i ${esc(S.trip.name)}</h3>
       <p class="muted" style="margin:6px 0 14px">For eksempel en gruppe som skal et annet sted enn resten.</p>
       <form id="newChForm">
         <div class="field"><label for="cName">Navn på chatten</label><input id="cName" placeholder="Gruppe Eiffeltårnet"></div>
-        <div class="field"><label for="cSub">Kort beskrivelse</label><input id="cSub" placeholder="Onsdag · 6 stk"></div>
-        <button class="btn primary big" type="submit">Opprett chat</button>
+        <div class="field"><label for="cSub">Kort beskrivelse</label><input id="cSub" placeholder="Onsdag"></div>
+        <div class="field">
+          <label>Hvem skal se den</label>
+          <div class="picks">
+            <label class="pick"><input type="radio" name="priv" value="" checked>
+              <span><b>Hele turen</b><br><small>Alle som er med på turen kan lese og skrive.</small></span></label>
+            <label class="pick"><input type="radio" name="priv" value="1">
+              <span><b>Bare de jeg velger</b><br><small>Usynlig for alle andre — også for reiseledere.</small></span></label>
+          </div>
+        </div>
+        <div class="field" id="memberPick" hidden>
+          <label>Velg deltakere</label>
+          <div id="memberList" class="memberlist"><p class="muted" style="padding:10px">Henter deltakere…</p></div>
+        </div>
+        <p class="err" id="chErr" hidden></p>
+        <button class="btn primary big" type="submit" id="chSubmit">Opprett chat</button>
       </form>
       <button class="btn close" data-close>Avbryt</button>`);
+
+    let people = [];
+    Api.tripMembers(S.trip.id).then(list => {
+      people = list.filter(p => !p.me);
+      const box = $("memberList");
+      if (!box) return;
+      box.innerHTML = people.length
+        ? people.map(p => `<label class="person">
+            <input type="checkbox" value="${esc(p.id)}">
+            <span>${esc(p.name)}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span></label>`).join("")
+        : `<p class="muted" style="padding:10px">Ingen andre har blitt med på turen ennå. Du kan legge dem til senere.</p>`;
+    }).catch(() => {
+      const box = $("memberList");
+      if (box) box.innerHTML = `<p class="muted" style="padding:10px">Klarte ikke hente deltakerlista.</p>`;
+    });
+
+    document.querySelectorAll('input[name="priv"]').forEach(r =>
+      r.addEventListener("change", () => {
+        $("memberPick").hidden = !document.querySelector('input[name="priv"]:checked').value;
+      }));
 
     $("newChForm").addEventListener("submit", async e => {
       e.preventDefault();
       const name = $("cName").value.trim();
-      if (!name) return;
+      const err = $("chErr"), btn = $("chSubmit");
+      if (!name) { err.textContent = "Chatten trenger et navn."; err.hidden = false; return; }
+      const isPrivate = Boolean(document.querySelector('input[name="priv"]:checked').value);
+      const ids = isPrivate
+        ? [...document.querySelectorAll("#memberList input:checked")].map(c => c.value)
+        : [];
+      btn.disabled = true; btn.textContent = "Oppretter…";
       try {
-        const id = await Api.addChannel(S.trip.id, name, $("cSub").value.trim());
+        const id = await Api.addChannel(S.trip.id, name, $("cSub").value.trim(), isPrivate, ids);
         S.channel = id; Api.setLastChannel(S.trip.id, id);
-        closeSheet(); render(); loadChat();
-      } catch { toast("Klarte ikke lage chatten."); }
+        closeSheet();
+        await openTrip(S.trip.id);
+        S.tab = "chat"; render(); loadChat();
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Opprett chat";
+        err.textContent = e2.message; err.hidden = false;
+      }
     });
+  }
+
+  /* Deltakere i én chat — hvem som kan lese den, og hvem du kan legge til. */
+  async function sheetChannelMembers(channelId) {
+    const ch = S.trip.channels.find(c => c.id === channelId);
+    if (!ch) return;
+
+    openSheet(`<h3>${esc(ch.name)}</h3>
+      <p class="muted" style="margin:6px 0 14px">
+        ${ch.private
+          ? "Privat chat. Bare de som står her kan lese den — reiseledere ser den ikke."
+          : "Åpen chat. Alle som er med på turen kan lese og skrive her."}</p>
+      <div id="cmBody"><p class="muted">Henter…</p></div>
+      <button class="btn close" data-close>Lukk</button>`);
+
+    if (!ch.private) {
+      try {
+        const all = await Api.tripMembers(S.trip.id);
+        $("cmBody").innerHTML = `<div class="memberlist">${all.map(p =>
+          `<div class="person"><span>${esc(p.name)}${p.me ? " <em>deg</em>" : p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span></div>`
+        ).join("")}</div>`;
+      } catch { $("cmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`; }
+      return;
+    }
+
+    try {
+      const [all, inChannel] = await Promise.all([
+        Api.tripMembers(S.trip.id),
+        Api.channelMembers(channelId)
+      ]);
+      const inSet = new Set(inChannel);
+      const members = all.filter(p => inSet.has(p.id));
+      const others = all.filter(p => !inSet.has(p.id));
+
+      $("cmBody").innerHTML = `
+        <div class="eyebrow" style="margin-bottom:6px">Med i chatten</div>
+        <div class="memberlist">${members.map(p => `<div class="person">
+          <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}</span>
+          ${p.me ? "" : `<button class="linkbtn" data-cmdel="${esc(p.id)}">fjern</button>`}
+        </div>`).join("")}</div>
+        ${others.length ? `
+          <div class="eyebrow" style="margin:16px 0 6px">Andre på turen</div>
+          <div class="memberlist">${others.map(p => `<div class="person">
+            <span>${esc(p.name)}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
+            <button class="linkbtn" data-cmadd="${esc(p.id)}">legg til</button>
+          </div>`).join("")}</div>` : ""}
+        <button class="btn danger" style="width:100%;margin-top:16px" data-cmleave="${esc(channelId)}">Gå ut av chatten</button>`;
+
+      $("cmBody").addEventListener("click", async ev => {
+        const b = ev.target.closest("[data-cmadd],[data-cmdel],[data-cmleave]");
+        if (!b) return;
+        try {
+          if (b.dataset.cmadd) await Api.addChannelMember(channelId, b.dataset.cmadd);
+          else if (b.dataset.cmdel) await Api.removeChannelMember(channelId, b.dataset.cmdel);
+          else {
+            if (!confirm("Gå ut av chatten? Du mister tilgangen til meldingene.")) return;
+            const me = all.find(p => p.me);
+            await Api.removeChannelMember(channelId, me.id);
+            closeSheet();
+            S.channel = null;
+            await openTrip(S.trip.id);
+            S.tab = "chat"; render(); return loadChat();
+          }
+          sheetChannelMembers(channelId);
+        } catch (e2) { toast(e2.message || "Det gikk ikke."); }
+      });
+    } catch {
+      $("cmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
+    }
   }
 
   function sheetAddDay() {
@@ -641,7 +761,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],#tripBtn,#meBtn,#resetBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],#tripBtn,#meBtn,#resetBtn");
     if (!t) return;
 
     if (t.hasAttribute("data-close")) return closeSheet();
@@ -708,6 +828,7 @@ const UI = (() => {
     }
 
     // ark
+    if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
     if (t.dataset.sheet === "place") return sheetPlace(t.dataset.place);
     if (t.dataset.sheet === "jointrip") return sheetJoinTrip();
     if (t.dataset.sheet === "newtrip") return sheetNewTrip();

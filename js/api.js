@@ -111,6 +111,10 @@ const Api = (() => {
     if (m.includes("ukjent_kode")) return new Error("Fant ingen tur med den koden.");
     if (m.includes("mangler_navn")) return new Error("Navn mangler.");
     if (m.includes("for_mange_turer")) return new Error("Du har laget for mange turer.");
+    if (m.includes("ikke_medlem")) return new Error("Du er ikke med på denne turen.");
+    if (m.includes("ingen_tilgang")) return new Error("Du har ikke tilgang til denne chatten.");
+    if (m.includes("ikke_paa_turen")) return new Error("Personen er ikke med på turen.");
+    if (m.includes("ukjent_chat")) return new Error("Fant ikke chatten.");
     if (m.includes("ikke_innlogget")) return new Error("Appen fikk ikke kontakt med serveren. Prøv igjen.");
     return new Error(m || "Noe gikk galt.");
   }
@@ -168,7 +172,7 @@ const Api = (() => {
           id: i.id, t: i.t, title: i.title, place: i.place_id, note: i.note, src: i.src
         }))
       }, fmtDay(d.date))),
-      channels: channels.map(c => ({ id: c.id, name: c.name, sub: c.sub }))
+      channels: channels.map(c => ({ id: c.id, name: c.name, sub: c.sub, private: c.private === true }))
     };
   }
 
@@ -246,12 +250,41 @@ const Api = (() => {
   }
 
   /* ───────── chatter ───────── */
-  async function addChannel(tripId, name, sub) {
-    const { data, error } = await sb.from("channels")
-      .insert({ trip_id: tripId, name, sub: sub || "" }).select().single();
+  async function addChannel(tripId, name, sub, isPrivate, memberIds) {
+    const { data, error } = await sb.rpc("create_channel", {
+      p_trip: tripId, p_name: name, p_sub: sub || "",
+      p_private: Boolean(isPrivate), p_members: memberIds || []
+    });
+    if (error) throw friendly(error);
+    const c = Array.isArray(data) ? data[0] : data;
+    if (cache.trip) cache.trip.channels.push({ id: c.id, name: c.name, sub: c.sub, private: c.private });
+    return c.id;
+  }
+
+  /* Hvem er med på turen — grunnlaget for å plukke deltakere til en chat. */
+  async function tripMembers(tripId) {
+    const { data, error } = await sb.from("members")
+      .select("user_id, name, role").eq("trip_id", tripId).order("name");
     if (error) throw error;
-    if (cache.trip) cache.trip.channels.push({ id: data.id, name: data.name, sub: data.sub });
-    return data.id;
+    return (data || []).map(m => ({ id: m.user_id, name: m.name, role: m.role, me: m.user_id === userId }));
+  }
+
+  async function channelMembers(channelId) {
+    const { data, error } = await sb.from("channel_members")
+      .select("user_id").eq("channel_id", channelId);
+    if (error) throw error;
+    return (data || []).map(r => r.user_id);
+  }
+
+  async function addChannelMember(channelId, personId) {
+    const { error } = await sb.rpc("add_channel_member", { p_channel: channelId, p_user: personId });
+    if (error) throw friendly(error);
+  }
+
+  async function removeChannelMember(channelId, personId) {
+    const { error } = await sb.from("channel_members").delete()
+      .eq("channel_id", channelId).eq("user_id", personId);
+    if (error) throw error;
   }
 
   /* ───────── program (kun reiseleder) ───────── */
@@ -299,7 +332,7 @@ const Api = (() => {
     // Uten sletteregelen i basen svarer API-et med suksess uten aa slette noe.
     // Sjekk derfor at raden faktisk er borte for vi melder at det gikk bra.
     const { data } = await sb.from("trips").select("id").eq("id", tripId).maybeSingle();
-    if (data) throw new Error("Databasen tillot ikke sletting. Kjor supabase/patch-01-slett-tur.sql i Supabase.");
+    if (data) throw new Error("Databasen tillot ikke sletting. Kjor supabase/schema.sql i Supabase paa nytt.");
     try { localStorage.removeItem(LS.snapshot(tripId)); } catch {}
   }
 
@@ -328,7 +361,7 @@ const Api = (() => {
       }
     }
     for (const c of (tpl.channels || [])) {
-      await addChannel(tripId, c.name, c.sub);
+      await addChannel(tripId, c.name, c.sub, false, []);
     }
   }
 
@@ -342,7 +375,8 @@ const Api = (() => {
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, sendMessage, deleteMessage, onChange,
-    addChannel, addPlace, addDay, setHotel, addItem, deleteItem, deleteDay,
+    addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember,
+    addPlace, addDay, setHotel, addItem, deleteItem, deleteDay,
     applyTemplate, signOutLocal
   };
 })();

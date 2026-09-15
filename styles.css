@@ -9,26 +9,7 @@
   --danger:#A33325;
   --r:14px;
   --safe-b:env(safe-area-inset-bottom,0px);
-}
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --ink:#E9EEF3; --ink-2:#A3B2C0; --ink-3:#74838F;
-    --ground:#0B1117; --surface:#151F29; --surface-2:#1C2733;
-    --line:#2A3945; --line-soft:#233039;
-    --blue:#6BA8E4; --blue-soft:#17304A; --blue-ink:#BBD6F2; --on-blue:#08121C;
-    --amber:#F0BC50; --amber-soft:#382D13;
-    --moss:#71BE96; --moss-soft:#14301F;
-    --danger:#E8897B;
-  }
-}
-:root[data-theme="dark"]{
-  --ink:#E9EEF3; --ink-2:#A3B2C0; --ink-3:#74838F;
-  --ground:#0B1117; --surface:#151F29; --surface-2:#1C2733;
-  --line:#2A3945; --line-soft:#233039;
-  --blue:#6BA8E4; --blue-soft:#17304A; --blue-ink:#BBD6F2; --on-blue:#08121C;
-  --amber:#F0BC50; --amber-soft:#382D13;
-  --moss:#71BE96; --moss-soft:#14301F;
-  --danger:#E8897B;
+  color-scheme:light;   /* appen er lys uansett hva telefonen staar paa */
 }
 
 *{box-sizing:border-box}
@@ -239,3 +220,15 @@ button,input,select,textarea{font:inherit;color:inherit}
 .toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--ground);padding:11px 16px;border-radius:11px;font-size:14px;font-weight:600;
   box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;text-align:center}
+
+/* ---------- deltakere i chat ---------- */
+.chanbar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:12.5px;color:var(--ink-3);padding:2px 2px 0}
+.memberlist{border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}
+.person{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:12px 13px;border-bottom:1px solid var(--line-soft);font-size:14.5px;min-height:48px;cursor:pointer}
+.person:last-child{border-bottom:0}
+.person input{width:19px;height:19px;accent-color:var(--blue);flex:none;margin-right:11px}
+.person label,.person span{display:flex;align-items:center;min-width:0}
+.person em{font-style:normal;color:var(--ink-3);font-size:12px;margin-left:7px}
+label.person{cursor:pointer}
