@@ -69,7 +69,10 @@ const UI = (() => {
       return;
     }
 
-    Api.onChange(() => { if (S.tab === "chat") render(); });
+    // Tegn paa nytt naar noe kommer inn utenfra - nye meldinger, reaksjoner
+    // eller vaer. Tidligere gjaldt dette bare chatten, saa vaeret dukket
+    // aldri opp i programmet for man byttet fane.
+    Api.onChange(() => { if (S.trip) render(); });
 
     const profile = Api.getProfile(), last = Api.getLastTrip();
     if (profile && last) {
