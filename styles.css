@@ -280,3 +280,13 @@ label.person span{flex:1;min-width:0}
 .sheet{touch-action:pan-y;will-change:transform}
 .sheet .grab{width:44px;height:5px;margin:0 auto 14px;border-radius:3px;background:var(--line);cursor:grab}
 .sheet.dragging{transition:none !important}
+
+/* Filvelger i importarket */
+.field input[type="file"]{
+  width:100%;border:1.5px dashed var(--line);background:var(--surface-2);border-radius:11px;
+  padding:14px;font-size:14px;
+}
+.field input[type="file"]::file-selector-button{
+  font-family:"Archivo",sans-serif;font-weight:600;font-size:13px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);border-radius:9px;padding:8px 12px;margin-right:11px;cursor:pointer;
+}

@@ -393,6 +393,29 @@ const Api = (() => {
     }
   }
 
+  /* ───────── les program fra PDF ───────── */
+  /* Selve modellkallet skjer på serveren; her sender vi bare filene dit
+     og får et forslag tilbake. Ingenting lagres før brukeren godkjenner. */
+  async function lesProgramFraPdf(tripId, filer) {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) throw new Error("Du er ikke innlogget.");
+
+    const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/les-program", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + data.session.access_token,
+        "apikey": CONFIG.supabaseAnonKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ tripId, filer })
+    });
+
+    let svar = null;
+    try { svar = await res.json(); } catch { /* tomt svar */ }
+    if (!res.ok) throw new Error((svar && svar.feil) || "Klarte ikke lese filen.");
+    return svar;
+  }
+
   function signOutLocal() {
     Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
     if (sb) sb.auth.signOut().catch(() => {});
@@ -405,6 +428,6 @@ const Api = (() => {
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember,
     addPlace, addDay, setHotel, addItem, deleteItem, deleteDay,
-    applyTemplate, signOutLocal
+    applyTemplate, lesProgramFraPdf, signOutLocal
   };
 })();

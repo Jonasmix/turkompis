@@ -143,7 +143,8 @@ const UI = (() => {
         <div class="eyebrow">Tomt program</div>
         <p class="muted" style="margin:10px 0 16px;color:var(--ink-2)">
           ${leader ? "Legg inn dagene i turen, så bygger appen resten." : "Reiselederen har ikke lagt inn programmet ennå."}</p>
-        ${leader ? `<button class="btn primary" data-sheet="addday">Legg til første dag</button>` : ""}
+        ${leader ? `<div class="stack"><button class="btn primary" data-sheet="addday">Legg til første dag</button>
+          <button class="btn" data-sheet="importpdf">Les inn program fra PDF</button></div>` : ""}
       </div>
       ${leader ? `<p class="muted">Del turkoden <b class="mono">${esc(trip.code)}</b> med deltakerne så de kan bli med.</p>` : ""}`;
     }
@@ -205,6 +206,7 @@ const UI = (() => {
       </div>
       ${leader ? `<div class="stack">
         <button class="btn primary" data-sheet="additem" data-day="${esc(d.id)}">Legg til programpunkt</button>
+        <button class="btn" data-sheet="importpdf">Les inn program fra PDF</button>
         <button class="btn" data-sheet="hotel" data-day="${esc(d.id)}">${hotel ? "Bytt hotell denne dagen" : "Sett hotell denne dagen"}</button>
         ${S.edit ? `<button class="btn danger" data-delday="${esc(d.id)}">Slett hele dagen</button>` : ""}
       </div>` : ""}`;
@@ -839,6 +841,163 @@ const UI = (() => {
     });
   }
 
+  /* ───────────────── les program fra PDF ───────────────── */
+  let forslag = null;   // siste forslag fra serveren, venter på godkjenning
+
+  function sheetImportPdf() {
+    openSheet(`<h3>Les inn program fra PDF</h3>
+      <p class="muted" style="margin:6px 0 14px">
+        Velg programmet, bussplanen eller billettene. Appen leser dem og viser et forslag
+        du må godkjenne før noe legges inn.</p>
+      <form id="pdfForm">
+        <div class="field">
+          <label for="pdfFiles">PDF-filer</label>
+          <input id="pdfFiles" type="file" accept="application/pdf" multiple>
+        </div>
+        <p class="muted" style="margin:-4px 0 14px">Maks 5 filer, 8 MB hver.</p>
+        <p class="err" id="pdfErr" hidden></p>
+        <button class="btn primary big" type="submit" id="pdfSubmit">Les filene</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("pdfForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const input = $("pdfFiles"), err = $("pdfErr"), btn = $("pdfSubmit");
+      const valgte = [...(input.files || [])];
+      if (!valgte.length) { err.textContent = "Velg minst én fil."; err.hidden = false; return; }
+
+      err.hidden = true;
+      btn.disabled = true; btn.textContent = "Leser filene…";
+      try {
+        const filer = [];
+        for (const f of valgte) filer.push({ navn: f.name, data: await tilBase64(f) });
+        const svar = await Api.lesProgramFraPdf(S.trip.id, filer);
+        forslag = svar.forslag;
+        visForslag(svar);
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Les filene";
+        err.textContent = e2.message; err.hidden = false;
+      }
+    });
+  }
+
+  function tilBase64(fil) {
+    return new Promise((ok, feil) => {
+      const r = new FileReader();
+      r.onload = () => ok(String(r.result).split(",")[1]);
+      r.onerror = () => feil(new Error("Klarte ikke lese " + fil.name));
+      r.readAsDataURL(fil);
+    });
+  }
+
+  function visForslag(svar) {
+    const dager = (forslag.dager || []).filter(d => d.dato);
+    const utenDato = (forslag.dager || []).length - dager.length;
+    const advarsler = (forslag.usikkert || []).slice();
+    if (utenDato) advarsler.push(`${utenDato} dag(er) manglet dato og er utelatt.`);
+
+    if (!dager.length) {
+      openSheet(`<h3>Fant ikke noe program</h3>
+        <p class="muted" style="margin:10px 0">Filen inneholdt ingen datoer med klokkeslett.
+        Er det en skannet PDF som bare er bilder, klarer ikke appen å lese den.</p>
+        ${advarsler.length ? `<div class="card pad" style="padding-block:12px"><div class="eyebrow">Merknader</div>
+          <ul style="margin:8px 0 0;padding-left:18px;font-size:14px;color:var(--ink-2)">
+            ${advarsler.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
+        <button class="btn close" data-close>Lukk</button>`);
+      return;
+    }
+
+    const bolker = dager.map((d, i) => {
+      const dag = Api.fmtDay(d.dato);
+      const punkter = (d.punkter || []).map((p, j) => `
+        <label class="person">
+          <input type="checkbox" data-punkt="${i}-${j}" checked>
+          <span><b class="mono">${esc(p.tid || "??:??")}</b> ${esc(p.tittel)}
+            ${p.stedNavn ? `<br><small style="color:var(--ink-3)">${esc(p.stedNavn)}${p.stedAdresse ? " · " + esc(p.stedAdresse) : " · mangler adresse"}</small>` : ""}
+          </span>
+        </label>`).join("");
+
+      return `<div style="margin-bottom:18px">
+        <div class="eyebrow" style="margin-bottom:6px">${esc(dag.label)}</div>
+        ${d.hotellNavn ? `<p class="muted" style="margin:0 0 7px">Hotell: ${esc(d.hotellNavn)}${d.hotellAdresse ? "" : " (mangler adresse)"}</p>` : ""}
+        <div class="memberlist">${punkter || '<p class="muted" style="padding:10px">Ingen punkter.</p>'}</div>
+      </div>`;
+    }).join("");
+
+    const antall = dager.reduce((n, d) => n + (d.punkter || []).length, 0);
+
+    openSheet(`<h3>Forslag fra filen</h3>
+      <p class="muted" style="margin:6px 0 14px">
+        ${dager.length} dager og ${antall} punkter. Hak av det som skal inn — sjekk særlig
+        klokkeslettene.</p>
+      ${advarsler.length ? `<div class="card pad" style="padding-block:12px;margin-bottom:16px;border-left:3px solid var(--amber)">
+        <div class="eyebrow" style="color:var(--amber)">Appen er usikker på</div>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
+          ${advarsler.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
+      ${bolker}
+      <p class="err" id="impErr" hidden></p>
+      <button class="btn primary big" id="impSubmit">Legg inn i programmet</button>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("impSubmit").addEventListener("click", () => leggInnForslag(dager));
+  }
+
+  async function leggInnForslag(dager) {
+    const btn = $("impSubmit"), err = $("impErr");
+    btn.disabled = true; btn.textContent = "Legger inn…";
+    try {
+      // Gjenbruk steder som allerede finnes, så vi ikke får duplikater.
+      const kjente = {};
+      for (const p of Object.values(S.trip.places)) kjente[p.name.toLowerCase()] = p.id;
+
+      const stedId = async (navn, adresse, type) => {
+        if (!navn) return null;
+        const n = navn.toLowerCase();
+        if (kjente[n]) return kjente[n];
+        const id = await Api.addPlace(S.trip.id, { name: navn, addr: adresse || "", kind: type || "Sted" });
+        kjente[n] = id;
+        return id;
+      };
+
+      for (let i = 0; i < dager.length; i++) {
+        const d = dager[i];
+        const valgte = (d.punkter || []).filter((_, j) => {
+          const boks = document.querySelector(`[data-punkt="${i}-${j}"]`);
+          return boks && boks.checked;
+        });
+        if (!valgte.length && !d.hotellNavn) continue;
+
+        // Finnes dagen fra før, bruk den i stedet for å lage en ny.
+        let dagId = (S.trip.days.find(x => x.date === d.dato) || {}).id;
+        if (!dagId) dagId = await Api.addDay(S.trip.id, d.dato);
+
+        if (d.hotellNavn) {
+          const hid = await stedId(d.hotellNavn, d.hotellAdresse, "Hotell");
+          if (hid) await Api.setHotel(dagId, hid);
+        }
+
+        for (const p of valgte) {
+          const sid = await stedId(p.stedNavn, p.stedAdresse, "Sted");
+          await Api.addItem(S.trip.id, dagId, {
+            t: /^\d{2}:\d{2}$/.test(p.tid) ? p.tid : "09:00",
+            title: p.tittel || "Programpunkt",
+            placeId: sid,
+            note: p.notat || ""
+          });
+        }
+      }
+
+      forslag = null;
+      closeSheet();
+      await openTrip(S.trip.id);
+      toast("Programmet er lagt inn.");
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "Legg inn i programmet";
+      err.textContent = e.message || "Klarte ikke legge inn alt.";
+      err.hidden = false;
+    }
+  }
+
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
@@ -936,6 +1095,7 @@ const UI = (() => {
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "about") return sheetAbout();
+    if (t.dataset.sheet === "importpdf") return sheetImportPdf();
 
     if (t.dataset.day) { S.day = t.dataset.day; return render(); }
   });
