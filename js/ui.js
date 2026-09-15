@@ -595,7 +595,28 @@ const UI = (() => {
     return `
       ${(() => {
         const o = oppgaver();
-        if (!o.length) return "";
+        const skjulte = oppgaver(true).filter(x => x.skjult);
+        if (!o.length && !skjulte.length) return "";
+
+        const skjultLenke = skjulte.length
+          ? `<button class="linkbtn" style="margin-top:9px;font-size:13px" data-sheet="skjulte">
+               ${skjulte.length} skjult${skjulte.length === 1 ? "" : "e"} — se dem</button>`
+          : "";
+
+        // Er alt ordnet, skal lenken til de skjulte fortsatt stå igjen.
+        // Ellers forsvinner veien tilbake sammen med selve lista.
+        if (!o.length) {
+          return `<div>
+            <div class="eyebrow" style="margin-bottom:8px;color:var(--moss)">Alt er i orden</div>
+            <div class="card pad" style="padding-block:14px;border-left:3px solid var(--moss)">
+              <p class="muted" style="margin:0">${skjulte.length
+                ? "Ingenting venter på deg. Det du har krysset av ligger under."
+                : "Alle steder har adresse, og alle dager har hotell."}</p>
+            </div>
+            ${skjultLenke}
+          </div>`;
+        }
+
         return `<div>
           <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Må ordnes · ${o.length}</div>
           <div class="card pad" style="border-left:3px solid var(--amber)">
@@ -607,10 +628,10 @@ const UI = (() => {
               <button class="linkbtn skjulknapp" data-skjul="${esc(x.slag)}" data-skjulid="${esc(x.id)}">ikke nødvendig</button>
             </div>`).join("")}</div>
           </div>
-          ${oppgaver(true).some(x => x.skjult) ? `<button class="linkbtn" style="margin-top:9px;font-size:13px" data-sheet="skjulte">Se skjulte oppgaver</button>` : ""}
+          ${skjultLenke}
         </div>`;
-      })()}
 
+      })()}
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Deg</div>
         <div class="card pad" style="padding-block:14px">
