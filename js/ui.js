@@ -164,9 +164,25 @@ const UI = (() => {
     return "";
   }
 
-  function vaerMerke(placeId, dato, tid) {
-    if (!placeId) return "";
-    const v = Api.vaerPunkt(placeId, dato, tid);
+
+  /* Dagens vær, vist ved siden av datoen: formiddag og ettermiddag der
+     gruppen bor eller skal være. Det er «været der du skal den dagen». */
+  function dagensVaer(d) {
+    const sted = d.hotel || (d.items.find(i => i.place) || {}).place;
+    if (!sted) return "";
+    const f = Api.vaerPunkt(sted, d.date, "09:00");
+    const e = Api.vaerPunkt(sted, d.date, "15:00");
+    if (!f && !e) return "";
+    const del = (v, nar) => v
+      ? `<span class="dagdel"><em>${nar}</em> ${vaerTegn(v.sym)}${v.temp == null ? "" : ` <b>${Math.round(v.temp)}°</b>`}</span>`
+      : "";
+    return `<div class="dagvaer">${del(f, "formiddag")}${del(e, "ettermiddag")}</div>`;
+  }
+  /* Har ikke punktet et sted med koordinater, bruker vi hotellet den dagen.
+     Vaeret er stort sett det samme i samme by, og det er byen folk lurer paa. */
+  function vaerMerke(placeId, dato, tid, reserve) {
+    let v = placeId ? Api.vaerPunkt(placeId, dato, tid) : null;
+    if (!v && reserve && reserve !== placeId) v = Api.vaerPunkt(reserve, dato, tid);
     if (!v) return "";
     const tegn = vaerTegn(v.sym);
     const grader = v.temp == null ? "" : `${Math.round(v.temp)}°`;
@@ -205,7 +221,7 @@ const UI = (() => {
       head = `<div class="nextup">
         <div class="lbl">${ne.day.date === today() ? "Neste i dag" : "Neste · " + esc(ne.day.label)}</div>
         <div class="t">${esc(ne.item.t)}</div>
-        <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t)}</div>
+        <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, ne.day.hotel)}</div>
         <div class="p">${p ? esc(p.name) : esc(ne.item.note || "")}</div>
         ${p ? `<div class="acts">
           <a class="btn solid" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Veibeskrivelse</a>
@@ -226,7 +242,7 @@ const UI = (() => {
       return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
         <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
-          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t)}</div>
+          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t, d.hotel)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
           ${S.edit ? `<div class="redigerrad">
             <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
@@ -244,6 +260,7 @@ const UI = (() => {
           <span>${esc(d.label)}${hotel ? " · bor på " + esc(hotel.name) : ""}</span>
           ${leader ? `<button class="linkbtn" style="font-size:11px" data-edit>${S.edit ? "Ferdig" : "Rediger"}</button>` : ""}
         </div>
+        ${dagensVaer(d)}
         <div class="card pad"><div class="tl">${rows}</div></div>
       </div>
       ${leader ? `<div class="stack">
