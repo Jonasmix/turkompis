@@ -2,7 +2,7 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null };
+  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {} };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -125,10 +125,45 @@ const UI = (() => {
     } else linje.hidden = true;
   }
 
+
+  /* Venter på at reiselederen slipper deg inn. Du ser navnet på turen,
+     men ingenting av innholdet — det sørger reglene i basen for. */
+  function visVenter(trip) {
+    $("joinScreen").hidden = true;
+    $("appScreen").hidden = true;
+    $("bootScreen").hidden = true;
+    $("authScreen").hidden = false;
+
+    $("authInner").innerHTML = `
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/><path d="M24 13v11l7 5"/></svg>
+      </div>
+      <h1>Venter på godkjenning</h1>
+      <p class="lede">Du har bedt om å bli med på <b>${esc(trip.name)}</b>.
+        Reiselederen må slippe deg inn før du ser programmet og chatten.</p>
+      <button class="btn primary big" id="sjekkIgjen">Sjekk om jeg er godkjent</button>
+      <button class="btn" style="width:100%;margin-top:10px" id="venterAnnen">Velg en annen tur</button>`;
+
+    $("sjekkIgjen").addEventListener("click", async e => {
+      const b = e.currentTarget;
+      b.disabled = true; b.innerHTML = prikker() + " Sjekker";
+      try { await openTrip(trip.id); }
+      catch { b.disabled = false; b.textContent = "Sjekk om jeg er godkjent"; }
+      if (!$("authScreen").hidden) {
+        b.disabled = false; b.textContent = "Sjekk om jeg er godkjent";
+        toast("Ikke godkjent ennå.");
+      }
+    });
+
+    $("venterAnnen").addEventListener("click", () => { S.trip = null; S.fraStart = true; showJoin(); });
+  }
   async function openTrip(tripId) {
     $("bootMsg").innerHTML = venter("Henter turen");
     const trip = await Api.loadTrip(tripId);
     if (!trip) throw new Error("Fant ikke turen");
+
+    // Venter du på godkjenning, slipper du ikke inn i appen ennå.
+    if (trip.venter) { S.trip = null; return visVenter(trip); }
 
     S.trip = trip;
     S.offline = Boolean(trip.stale);
@@ -381,20 +416,55 @@ const UI = (() => {
   }
 
   /* ───────────────── chat ───────────────── */
-  function actionCard(a) {
+  /* Kartforslaget er en smal stripe som glir ut ved siden av meldingen.
+     Den trekker seg sammen til et lite merke etter noen sekunder, så den
+     ikke stjeler plass i samtalen — men forsvinner aldri helt. Trykker du
+     på den, blir den stående åpen til du lukker den selv. */
+  const kartTimere = new Set();
+
+  function actionCard(a, msgId) {
     const p = S.trip.places[a.place];
     if (!p) return "";
     const day = Parse.dayOf(S.trip, a.date);
-    return `<div class="aicard">
-      <div class="hd">${ICON.spark}<span>TourFlow fant en avtale</span></div>
-      <div class="dest">${esc(p.name)}</div>
-      <div class="meta">${a.time ? `<span class="mono">${esc(a.time)}</span> · ` : ""}${esc(day ? day.label : a.date)}<br>${esc(p.addr)}</div>
-      <div class="why">${esc(a.why)}</div>
-      <div class="acts">
-        <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
-        <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
+    const tilstand = S.kart[msgId] || "vis";
+
+    return `<div class="kartboks ${tilstand}" data-kart="${esc(msgId)}">
+      <button class="kartmerke" data-kartapne="${esc(msgId)}" aria-label="Vis veibeskrivelse">${ICON.pin}</button>
+
+      <button class="kartstripe" data-kartapne="${esc(msgId)}">
+        ${ICON.pin}
+        <span class="kartnavn">${esc(p.name)}</span>
+        ${a.time ? `<span class="karttid mono">${esc(a.time)}</span>` : ""}
+      </button>
+
+      <div class="kartkort">
+        <div class="kartkorthode">
+          <div>
+            <div class="dest">${esc(p.name)}</div>
+            <div class="meta">${a.time ? `<span class="mono">${esc(a.time)}</span> · ` : ""}${esc(day ? day.label : a.date)}<br>${esc(p.addr)}</div>
+          </div>
+          <button class="kartlukk" data-kartlukk="${esc(msgId)}" aria-label="Lukk">✕</button>
+        </div>
+        <div class="why">${esc(a.why)}</div>
+        <div class="acts">
+          <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
+          <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
+        </div>
       </div>
     </div>`;
+  }
+
+  /* Start nedtellingen for kartstriper som nettopp dukket opp. Én gang
+     per melding — ellers ville hver ny tegning gitt den nye sekunder. */
+  function startKarttimere() {
+    for (const boks of $("screen").querySelectorAll(".kartboks.vis")) {
+      const id = boks.dataset.kart;
+      if (kartTimere.has(id)) continue;
+      kartTimere.add(id);
+      setTimeout(() => {
+        if ((S.kart[id] || "vis") === "vis") { S.kart[id] = "liten"; render(); }
+      }, 6000);
+    }
   }
 
   /* Chatten har to nivåer, som i Snapchat: en liste, og én åpen samtale.
@@ -446,7 +516,7 @@ const UI = (() => {
               ${esc(r.emoji)}<span>${r.navn.length}</span></button>`).join("")}
           </div>` : ""}
         <div class="stamp">${esc(dayStamp(m.ts))}${m.mine ? ` · <button class="linkbtn" style="font-size:10.5px" data-delmsg="${esc(m.id)}">slett</button>` : ""}</div>
-        ${m.action ? actionCard(m.action) : ""}
+        ${m.action ? actionCard(m.action, m.id) : ""}
       </div>`;
     }).join("");
 
@@ -751,6 +821,7 @@ const UI = (() => {
     } else slot.innerHTML = "";
 
     settOppDraing();
+    startKarttimere();
 
     // Dagsvelgeren skal stå der du forlot den, ikke hoppe til mandag.
     const chipsEtter = $("screen").querySelector(".chips");
@@ -1599,34 +1670,65 @@ const UI = (() => {
         ${leder
           ? "Reiseledere kan endre programmet og lese inn PDF-er. Du kan gi rollen videre."
           : "Reiseledere kan endre programmet."}</p>
+      ${leder ? `<label class="pick" style="margin-bottom:16px">
+        <input type="checkbox" id="krevGodkjenning" ${S.trip.krevGodkjenning ? "checked" : ""}>
+        <span><b>Krev godkjenning for å bli med</b><br>
+          <small>Nye deltakere må slippes inn av en reiseleder. Turkoden alene holder ikke.</small></span>
+      </label>` : ""}
       <div id="tmBody">${venter("Henter")}</div>
       <button class="btn close" data-close>Lukk</button>`);
 
+    const bryter = $("krevGodkjenning");
+    if (bryter) bryter.addEventListener("change", async () => {
+      try {
+        await Api.setKrevGodkjenning(S.trip.id, bryter.checked);
+        S.trip.krevGodkjenning = bryter.checked;
+        toast(bryter.checked ? "Nye må nå godkjennes." : "Alle med koden slipper inn.");
+      } catch {
+        bryter.checked = !bryter.checked;
+        toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+      }
+    });
+
     try {
       const folk = await Api.tripMembers(S.trip.id);
-      const ledere = folk.filter(p => p.role === "leader");
+      const ventende = folk.filter(p => p.venter);
+      const med = folk.filter(p => !p.venter);
+      const ledere = med.filter(p => p.role === "leader");
 
-      $("tmBody").innerHTML = `<div class="memberlist">${folk.map(p => `
-        <div class="person">
-          <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
-          ${leder ? (p.role === "leader"
-            ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
-            : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`) : ""}
-        </div>`).join("")}</div>
+      $("tmBody").innerHTML = `
+        ${ventende.length ? `
+          <div class="eyebrow" style="margin-bottom:7px;color:var(--amber)">Venter på svar · ${ventende.length}</div>
+          <div class="memberlist" style="margin-bottom:18px">${ventende.map(p => `
+            <div class="person">
+              <span>${esc(p.name)}</span>
+              <span style="display:flex;gap:10px;flex:none">
+                <button class="linkbtn" data-godkjenn="${esc(p.id)}">slipp inn</button>
+                <button class="linkbtn" style="color:var(--danger)" data-avvis="${esc(p.id)}">avvis</button>
+              </span>
+            </div>`).join("")}</div>` : ""}
+
+        <div class="eyebrow" style="margin-bottom:7px">Med på turen · ${med.length}</div>
+        <div class="memberlist">${med.map(p => `
+          <div class="person">
+            <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
+            ${leder ? (p.role === "leader"
+              ? (ledere.length > 1 ? `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="member">fjern rolle</button>` : "")
+              : `<button class="linkbtn" data-rolle="${esc(p.id)}" data-til="leader">gjør til leder</button>`) : ""}
+          </div>`).join("")}</div>
         ${leder ? `<p class="muted" style="margin-top:12px">Den som laget turen beholder lederrollen,
           og turen må alltid ha minst én.</p>` : ""}`;
 
       $("tmBody").addEventListener("click", async ev => {
-        const b = ev.target.closest("[data-rolle]");
+        const b = ev.target.closest("[data-rolle],[data-godkjenn],[data-avvis]");
         if (!b) return;
-        const navn = b.closest(".person").innerText.split("\n")[0];
-        if (b.dataset.til === "leader" && !confirm(`Gi ${navn} lederrollen? Da kan hen endre programmet.`)) return;
         try {
-          await Api.setMemberRole(S.trip.id, b.dataset.rolle, b.dataset.til);
+          if (b.dataset.godkjenn) await Api.godkjennDeltaker(S.trip.id, b.dataset.godkjenn);
+          else if (b.dataset.avvis) await Api.avvisDeltaker(S.trip.id, b.dataset.avvis);
+          else await Api.setMemberRole(S.trip.id, b.dataset.rolle, b.dataset.til);
           await openTrip(S.trip.id);
           sheetTripMembers();
-          toast("Rollen er endret.");
-        } catch (e) { toast(e.message || "Klarte ikke endre rollen."); }
+        } catch (e) { toast(e.message || "Klarte ikke endre."); }
       });
     } catch {
       $("tmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
@@ -1802,7 +1904,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -1878,6 +1980,8 @@ const UI = (() => {
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
     if (t.dataset.skjul) return skjulOppgave(t.dataset.skjul, t.dataset.skjulid, true);
     if (t.dataset.vis) { closeSheet(); return skjulOppgave(t.dataset.vis, t.dataset.visid, false); }
+    if (t.dataset.kartapne) { S.kart[t.dataset.kartapne] = "apen"; return render(); }
+    if (t.dataset.kartlukk) { S.kart[t.dataset.kartlukk] = "liten"; return render(); }
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
     if (t.dataset.svar) { closeSheet(); return startSvar(t.dataset.svar); }

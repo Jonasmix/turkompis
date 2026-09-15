@@ -473,3 +473,56 @@ label.person span{flex:1;min-width:0}
   background:var(--amber-soft);border-left:3px solid var(--amber);border-radius:10px;
   padding:11px 13px;font-size:14px;line-height:1.45;color:var(--ink);margin:0 0 20px;
 }
+
+/* ---------- kartforslag i chatten ---------- */
+/* Tre tilstander: stripe (nettopp dukket opp), lite merke (trukket
+   sammen), og åpent kort (du trykket, og lukker selv). */
+.kartboks{margin-top:5px}
+.kartboks .kartmerke,
+.kartboks .kartstripe,
+.kartboks .kartkort{display:none}
+
+.kartboks.vis .kartstripe{display:inline-flex;animation:glidUt .28s ease-out}
+.kartboks.liten .kartmerke{display:inline-grid}
+.kartboks.apen .kartkort{display:block;animation:glidUt .2s ease-out}
+
+.kartstripe{
+  align-items:center;gap:7px;cursor:pointer;max-width:100%;
+  border:1px solid var(--line);border-left:3px solid var(--amber);
+  background:var(--surface);border-radius:20px;padding:6px 12px 6px 9px;
+  font:inherit;color:var(--ink);text-align:left;min-height:34px;
+}
+.kartstripe svg{width:14px;height:14px;flex:none;stroke:var(--amber);fill:none;stroke-width:1.9}
+.kartnavn{font-family:"Archivo",sans-serif;font-weight:600;font-size:13px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.karttid{font-size:12px;color:var(--ink-3);flex:none}
+
+.kartmerke{
+  place-items:center;width:30px;height:30px;border-radius:50%;cursor:pointer;
+  border:1px solid var(--line);background:var(--surface);padding:0;
+}
+.kartmerke svg{width:14px;height:14px;stroke:var(--amber);fill:none;stroke-width:1.9}
+
+.kartkort{
+  border:1px solid var(--line);border-left:3px solid var(--amber);
+  border-radius:12px;background:var(--surface);padding:11px 12px;
+}
+.kartkorthode{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.kartkort .dest{font-family:"Archivo",sans-serif;font-weight:600;font-size:14.5px}
+.kartkort .meta{font-size:12.5px;color:var(--ink-2);margin-top:3px}
+.kartkort .why{font-size:11.5px;color:var(--ink-3);margin-top:7px;
+  border-top:1px dashed var(--line-soft);padding-top:7px}
+.kartkort .acts{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}
+.kartkort .acts .btn{font-size:13px;padding:9px 8px;min-height:40px}
+.kartlukk{
+  border:0;background:none;cursor:pointer;color:var(--ink-3);font-size:15px;
+  min-width:32px;min-height:32px;flex:none;border-radius:50%;
+}
+
+@keyframes glidUt{
+  from{opacity:0;transform:translateX(-10px)}
+  to{opacity:1;transform:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .kartboks.vis .kartstripe,.kartboks.apen .kartkort{animation:none}
+}

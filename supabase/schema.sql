@@ -529,3 +529,120 @@ alter table public.places add column if not exists ignore_position boolean not n
 alter table public.days   add column if not exists ignore_hotel    boolean not null default false;
 
 notify pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 08 — én reaksjon per person, og godkjenning for å bli med
+-- ═══════════════════════════════════════════════════════════════
+
+-- Én reaksjon per person per melding. Velger man en ny, erstatter den
+-- den forrige. Behold den nyeste av dem som alt finnes.
+delete from public.reactions r
+using public.reactions r2
+where r.message_id = r2.message_id
+  and r.user_id    = r2.user_id
+  and r.created_at < r2.created_at;
+
+alter table public.reactions drop constraint if exists reactions_pkey;
+alter table public.reactions add primary key (message_id, user_id);
+
+-- Reiselederen kan kreve at nye deltakere godkjennes.
+alter table public.trips
+  add column if not exists require_approval boolean not null default false;
+
+alter table public.members
+  add column if not exists status text not null default 'approved';
+
+do $$
+begin
+  alter table public.members add constraint members_status_sjekk
+    check (status in ('pending', 'approved'));
+exception when duplicate_object then null;
+end $$;
+
+-- Bare godkjente regnes som medlemmer. Uten dette ville en som venter
+-- kunne lese alt mens hen venter.
+create or replace function public.is_trip_member(p_trip uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.members
+    where trip_id = p_trip and user_id = auth.uid() and status = 'approved'
+  );
+$$;
+
+create or replace function public.is_trip_leader(p_trip uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.members
+    where trip_id = p_trip and user_id = auth.uid()
+      and role = 'leader' and status = 'approved'
+  );
+$$;
+
+-- Har jeg i det hele tatt en rad på turen — godkjent eller ikke?
+create or replace function public.har_rad_paa_tur(p_trip uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.members where trip_id = p_trip and user_id = auth.uid()
+  );
+$$;
+
+-- Den som venter må få se navnet på turen hen venter på, og sin egen rad.
+drop policy if exists trips_read on public.trips;
+create policy trips_read on public.trips for select using (
+  public.is_trip_member(id) or public.har_rad_paa_tur(id)
+);
+
+drop policy if exists mem_read on public.members;
+create policy mem_read on public.members for select using (
+  public.is_trip_member(trip_id) or user_id = auth.uid()
+);
+
+-- Innmelding tar hensyn til om turen krever godkjenning.
+create or replace function public.join_trip(p_code text, p_name text)
+returns public.trips language plpgsql security definer set search_path = public as $$
+declare t public.trips; v_status text;
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  if coalesce(trim(p_name), '') = '' then raise exception 'mangler_navn'; end if;
+
+  select * into t from public.trips
+   where code = upper(regexp_replace(coalesce(p_code,''), '\s', '', 'g'));
+  if not found then raise exception 'ukjent_kode'; end if;
+
+  v_status := case when t.require_approval then 'pending' else 'approved' end;
+
+  insert into public.members (trip_id, user_id, name, status)
+  values (t.id, auth.uid(), trim(p_name), v_status)
+  on conflict (trip_id, user_id) do update set name = excluded.name;
+
+  return t;
+end; $$;
+
+-- Godkjenn eller avvis en som venter.
+create or replace function public.set_member_status(
+  p_trip uuid, p_user uuid, p_status text
+) returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_trip_leader(p_trip) then raise exception 'ikke_leder'; end if;
+  if p_status not in ('pending', 'approved') then raise exception 'ukjent_status'; end if;
+
+  update public.members set status = p_status
+   where trip_id = p_trip and user_id = p_user;
+  return true;
+end; $$;
+
+-- Avvis: fjern raden helt, så personen kan prøve igjen senere.
+create or replace function public.avvis_deltaker(p_trip uuid, p_user uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_trip_leader(p_trip) then raise exception 'ikke_leder'; end if;
+  delete from public.members where trip_id = p_trip and user_id = p_user and status = 'pending';
+  return true;
+end; $$;
+
+revoke all on function public.set_member_status(uuid, uuid, text) from public;
+revoke all on function public.avvis_deltaker(uuid, uuid) from public;
+grant execute on function public.set_member_status(uuid, uuid, text) to authenticated;
+grant execute on function public.avvis_deltaker(uuid, uuid) to authenticated;
+
+notify pgrst, 'reload schema';

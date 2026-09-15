@@ -157,7 +157,10 @@ const Api = (() => {
     try {
       const [trip, member, places, days, items, channels] = await Promise.all([
         sb.from("trips").select("*").eq("id", tripId).single(),
-        sb.from("members").select("role, name").eq("trip_id", tripId).eq("user_id", userId).single(),
+        sb.from("members").select("role, name, status").eq("trip_id", tripId).eq("user_id", userId).single()
+          .then(r => (r.error && /status/.test(r.error.message || ""))
+            ? sb.from("members").select("role, name").eq("trip_id", tripId).eq("user_id", userId).single()
+            : r),
         sb.from("places").select("*").eq("trip_id", tripId),
         sb.from("days").select("*").eq("trip_id", tripId).order("date"),
         sb.from("items").select("*").eq("trip_id", tripId),
@@ -206,6 +209,8 @@ const Api = (() => {
 
     return {
       id: trip.id, code: trip.code, name: trip.name, org: trip.org,
+      krevGodkjenning: trip.require_approval === true,
+      venter: member ? member.status === "pending" : false,
       dates: days.length ? datoSpenn(days[0].date, days[days.length - 1].date) : "",
       role: member ? member.role : "member",
       places: placeMap,
@@ -280,15 +285,17 @@ const Api = (() => {
     return Object.values(grupper);
   }
 
+  /* Én reaksjon per person: velger du en ny, erstatter den den forrige.
+     Trykker du på den du alt har, fjernes den. */
   async function toggleReaction(channelId, messageId, emoji) {
     const p = getProfile();
     const liste = cache.reactions[channelId] || (cache.reactions[channelId] = []);
-    const finnes = liste.find(r => r.message_id === messageId && r.user_id === userId && r.emoji === emoji);
+    const min = liste.find(r => r.message_id === messageId && r.user_id === userId);
 
-    if (finnes) {
-      liste.splice(liste.indexOf(finnes), 1);
+    if (min && min.emoji === emoji) {
+      liste.splice(liste.indexOf(min), 1);
       const { error } = await sb.from("reactions").delete()
-        .eq("message_id", messageId).eq("user_id", userId).eq("emoji", emoji);
+        .eq("message_id", messageId).eq("user_id", userId);
       if (error) throw error;
       return;
     }
@@ -297,10 +304,12 @@ const Api = (() => {
       message_id: messageId, channel_id: channelId,
       name: p ? p.name : "Ukjent", emoji
     };
-    liste.push({ ...rad, user_id: userId });
-    const { error } = await sb.from("reactions").insert(rad);
+    if (min) min.emoji = emoji; else liste.push({ ...rad, user_id: userId });
+
+    const { error } = await sb.from("reactions")
+      .upsert(rad, { onConflict: "message_id,user_id" });
     if (error) {
-      liste.pop();
+      await lastReaksjoner(channelId);
       throw error;
     }
   }
@@ -400,9 +409,18 @@ const Api = (() => {
   /* Hvem er med på turen — grunnlaget for å plukke deltakere til en chat. */
   async function tripMembers(tripId) {
     const { data, error } = await sb.from("members")
-      .select("user_id, name, role").eq("trip_id", tripId).order("name");
+      .select("user_id, name, role, status").eq("trip_id", tripId).order("name");
+    if (error && /status/.test(error.message || "")) {
+      // Godkjenning er ikke lagt til i basen enda.
+      const p = await sb.from("members").select("user_id, name, role").eq("trip_id", tripId).order("name");
+      if (p.error) throw p.error;
+      return (p.data || []).map(m => ({ id: m.user_id, name: m.name, role: m.role, venter: false, me: m.user_id === userId }));
+    }
     if (error) throw error;
-    return (data || []).map(m => ({ id: m.user_id, name: m.name, role: m.role, me: m.user_id === userId }));
+    return (data || []).map(m => ({
+      id: m.user_id, name: m.name, role: m.role,
+      venter: m.status === "pending", me: m.user_id === userId
+    }));
   }
 
   async function channelMembers(channelId) {
@@ -424,6 +442,25 @@ const Api = (() => {
   }
 
   /* ───────── program (kun reiseleder) ───────── */
+
+  /* ───────── godkjenning for å bli med ───────── */
+  async function setKrevGodkjenning(tripId, paa) {
+    const { error } = await sb.from("trips").update({ require_approval: !!paa }).eq("id", tripId);
+    if (error) throw error;
+    if (cache.trip) cache.trip.krevGodkjenning = !!paa;
+  }
+
+  async function godkjennDeltaker(tripId, personId) {
+    const { error } = await sb.rpc("set_member_status", {
+      p_trip: tripId, p_user: personId, p_status: "approved"
+    });
+    if (error) throw friendly(error);
+  }
+
+  async function avvisDeltaker(tripId, personId) {
+    const { error } = await sb.rpc("avvis_deltaker", { p_trip: tripId, p_user: personId });
+    if (error) throw friendly(error);
+  }
   async function addPlace(tripId, { name, addr, kind, url }) {
     const { data, error } = await sb.from("places")
       .insert({ trip_id: tripId, name, addr: addr || "", kind: kind || "Sted", url: url || "" }).select().single();
@@ -722,6 +759,7 @@ const Api = (() => {
     messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
+    setKrevGodkjenning, godkjennDeltaker, avvisDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
