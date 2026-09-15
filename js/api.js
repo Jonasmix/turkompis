@@ -35,6 +35,18 @@ const Api = (() => {
     };
   }
 
+
+  /* Perioden regnes ut av dagene i programmet, ikke av en tekst noen skrev
+     en gang. Da kan den ikke bli stående og lyve når programmet endres. */
+  function datoSpenn(fra, til) {
+    if (!fra) return "";
+    const d1 = new Date(fra + "T12:00:00"), d2 = new Date((til || fra) + "T12:00:00");
+    const dag = d => d.toLocaleDateString("nb-NO", { day: "numeric" });
+    const full = d => d.toLocaleDateString("nb-NO", { day: "numeric", month: "long" });
+    if (fra === til) return full(d1);
+    if (d1.getMonth() === d2.getMonth()) return `${dag(d1)}.–${full(d2)}`;
+    return `${full(d1)} – ${full(d2)}`;
+  }
   /* ───────── oppstart ───────── */
   async function init() {
     if (!CONFIG.ready) return { ok: false, reason: "mangler_config" };
@@ -81,20 +93,36 @@ const Api = (() => {
     if (!online()) return [];
     const { data, error } = await sb
       .from("members")
-      .select("role, trips ( id, code, name, org, dates_label )")
+      .select("role, trips ( id, code, name, org )")
       .eq("user_id", userId);
     if (error) throw error;
-    return (data || [])
-      .filter(r => r.trips)
-      .map(r => ({ id: r.trips.id, code: r.trips.code, name: r.trips.name,
-                   org: r.trips.org, dates: r.trips.dates_label, role: r.role }));
+
+    const rader = (data || []).filter(r => r.trips);
+    const ids = rader.map(r => r.trips.id);
+
+    // Perioden hentes fra dagene, ikke fra et tekstfelt.
+    const spenn = {};
+    if (ids.length) {
+      const { data: dager } = await sb.from("days").select("trip_id, date").in("trip_id", ids);
+      for (const d of (dager || [])) {
+        const s = spenn[d.trip_id] || (spenn[d.trip_id] = { fra: d.date, til: d.date });
+        if (d.date < s.fra) s.fra = d.date;
+        if (d.date > s.til) s.til = d.date;
+      }
+    }
+
+    return rader.map(r => ({
+      id: r.trips.id, code: r.trips.code, name: r.trips.name, org: r.trips.org,
+      dates: spenn[r.trips.id] ? datoSpenn(spenn[r.trips.id].fra, spenn[r.trips.id].til) : "",
+      role: r.role
+    }));
   }
 
   async function joinByCode(code, name) {
     const { data, error } = await sb.rpc("join_trip", { p_code: code, p_name: name });
     if (error) throw friendly(error);
     const t = Array.isArray(data) ? data[0] : data;
-    return { id: t.id, code: t.code, name: t.name, org: t.org, dates: t.dates_label };
+    return { id: t.id, code: t.code, name: t.name, org: t.org, dates: "" };
   }
 
   async function createTrip({ name, org, dates, leaderName }) {
@@ -103,7 +131,7 @@ const Api = (() => {
     });
     if (error) throw friendly(error);
     const t = Array.isArray(data) ? data[0] : data;
-    return { id: t.id, code: t.code, name: t.name, org: t.org, dates: t.dates_label, role: "leader" };
+    return { id: t.id, code: t.code, name: t.name, org: t.org, dates: "", role: "leader" };
   }
 
   function friendly(error) {
@@ -163,7 +191,8 @@ const Api = (() => {
     for (const it of items) (byDay[it.day_id] = byDay[it.day_id] || []).push(it);
 
     return {
-      id: trip.id, code: trip.code, name: trip.name, org: trip.org, dates: trip.dates_label,
+      id: trip.id, code: trip.code, name: trip.name, org: trip.org,
+      dates: days.length ? datoSpenn(days[0].date, days[days.length - 1].date) : "",
       role: member ? member.role : "member",
       places: placeMap,
       days: days.map(d => Object.assign({

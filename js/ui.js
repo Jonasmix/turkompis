@@ -517,7 +517,6 @@ const UI = (() => {
                     <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast"></div>`}
         <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Berlin 2027"></div>
         <div class="field"><label for="tOrg">Klasse eller gruppe</label><input id="tOrg" placeholder="2STB Nordvang vgs"></div>
-        <div class="field"><label for="tDates">Når</label><input id="tDates" placeholder="5.–9. oktober"></div>
         <div class="field">
           <label>Start med</label>
           <div class="picks">
@@ -549,12 +548,10 @@ const UI = (() => {
 
       btn.disabled = true; btn.textContent = tpl ? "Lager turen og programmet…" : "Lager turen…";
       try {
-        let dates = $("tDates").value.trim();
-        let plan = null;
-        if (tpl) { plan = templateDates(tpl); if (!dates) dates = plan.label; }
+        const plan = tpl ? templateDates(tpl) : null;
 
         const trip = await Api.createTrip({
-          name, org: $("tOrg").value.trim(), dates, leaderName: prof.name
+          name, org: $("tOrg").value.trim(), dates: "", leaderName: prof.name
         });
         if (tpl) await Api.applyTemplate(trip.id, tpl, plan.dates);
 
