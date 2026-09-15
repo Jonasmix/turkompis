@@ -100,7 +100,24 @@
 <script src="js/ui.js"></script>
 <script>
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  // Laster siden seg selv på nytt én gang når en ny versjon har tatt over,
+  // slik at man aldri sitter igjen med gammel CSS eller gammel kode.
+  let laster = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (laster) return;
+    laster = true;
+    location.reload();
+  });
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").then(reg => {
+      reg.update();
+      // Se etter ny versjon hver gang appen hentes fram igjen.
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") reg.update();
+      });
+    }).catch(() => {});
+  });
 }
 </script>
 </body>

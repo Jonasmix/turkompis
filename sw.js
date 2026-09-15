@@ -1,7 +1,12 @@
 /* sw.js — gjør appen tilgjengelig uten nett.
-   Bump CACHE når filene endres, ellers får folk den gamle versjonen. */
 
-const CACHE = "turkompis-v6";
+   Strategi: svar fra lageret med én gang, men hent alltid ny versjon i
+   bakgrunnen og legg den i lageret. Da er appen rask og virker offline,
+   samtidig som en ny utgave aldri blir hengende igjen. Sammen med
+   controllerchange-lytteren i index.html laster siden seg selv på nytt
+   når en ny versjon har tatt over. */
+
+const CACHE = "turkompis-v7";
 const SHELL = [
   "./",
   "index.html",
@@ -52,12 +57,14 @@ self.addEventListener("fetch", e => {
   if (url.origin !== self.location.origin) return;  // API og skrifter går rett på nett
 
   e.respondWith(
-    caches.match(req).then(hit => hit || fetch(req).then(res => {
-      if (res.ok) {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy));
-      }
-      return res;
-    }).catch(() => hit))
+    caches.open(CACHE).then(cache =>
+      cache.match(req).then(hit => {
+        const nett = fetch(req).then(res => {
+          if (res && res.ok) cache.put(req, res.clone());
+          return res;
+        }).catch(() => hit);
+        return hit || nett;   // lagret svar nå, ny versjon til neste gang
+      })
+    )
   );
 });
