@@ -95,9 +95,20 @@ const UI = (() => {
   function showJoin() {
     $("bootScreen").hidden = true;
     $("appScreen").hidden = true;
+    $("authScreen").hidden = true;
     $("joinScreen").hidden = false;
+
     const p = Api.getProfile();
     if (p) { $("fFirst").value = p.first; $("fLast").value = p.last; }
+
+    // Er du innlogget, men uten turer, ser skjermen ut som forste gang.
+    // Si fra at du faktisk er logget inn, saa du ikke tror det feilet.
+    const linje = $("joinKonto");
+    const epost = Api.minEpost && Api.minEpost();
+    if (epost) {
+      linje.innerHTML = `Innlogget som <b>${esc(epost)}</b>. Du er ikke med på noen tur ennå 2014 skriv turkoden under.`;
+      linje.hidden = false;
+    } else linje.hidden = true;
   }
 
   async function openTrip(tripId) {

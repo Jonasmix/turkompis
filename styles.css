@@ -452,3 +452,9 @@ label.person span{flex:1;min-width:0}
   font-family:"IBM Plex Mono",monospace;letter-spacing:.35em;
 }
 #authScreen .lede{margin-bottom:22px}
+
+/* Beskjed om at du er innlogget, på skjermen der du blir med på en tur */
+.kontolinje{
+  background:var(--moss-soft);color:var(--ink);border-left:3px solid var(--moss);
+  border-radius:10px;padding:11px 13px;font-size:14px;margin:0 0 20px;line-height:1.45;
+}
