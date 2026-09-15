@@ -2,22 +2,21 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "program", day: null, channel: null };
+  const S = { trip: null, tab: "program", day: null, channel: null, trips: [], edit: false, offline: false, busy: false };
 
-  /* ---------- små hjelpere ---------- */
   const $ = id => document.getElementById(id);
-  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
   const today = () => new Date().toISOString().slice(0, 10);
   const clock = iso => new Date(iso).toLocaleTimeString("nb-NO", { hour:"2-digit", minute:"2-digit" });
 
   function dayStamp(iso) {
-    const d = new Date(iso), n = new Date();
-    const same = d.toDateString() === n.toDateString();
-    return same ? clock(iso) : d.toLocaleDateString("nb-NO", { weekday:"short", day:"numeric", month:"short" }) + " " + clock(iso);
+    const d = new Date(iso);
+    return d.toDateString() === new Date().toDateString()
+      ? clock(iso)
+      : d.toLocaleDateString("nb-NO", { weekday:"short", day:"numeric", month:"short" }) + " " + clock(iso);
   }
   function daysUntil(date) {
-    const a = new Date(today() + "T12:00:00"), b = new Date(date + "T12:00:00");
-    return Math.round((b - a) / 86400000);
+    return Math.round((new Date(date + "T12:00:00") - new Date(today() + "T12:00:00")) / 86400000);
   }
   const mapsGoogle = p => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.name + ", " + p.addr) + "&travelmode=transit";
   const mapsApple  = p => "https://maps.apple.com/?daddr=" + encodeURIComponent(p.name + ", " + p.addr) + "&dirflg=r";
@@ -28,7 +27,7 @@ const UI = (() => {
     spark:'<svg viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6.3 6.3l3 3M14.7 14.7l3 3M17.7 6.3l-3 3M9.3 14.7l-3 3"/></svg>',
     cal:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
     chat:'<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1.2-4.4A8 8 0 1 1 21 12Z"/></svg>',
-    file:'<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>',
+    prog:'<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/><circle cx="14" cy="18" r="2"/></svg>',
     me:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
     send:'<svg viewBox="0 0 24 24"><path d="M4 12 20 4l-7 16-2-7-7-1Z"/></svg>',
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
@@ -38,55 +37,113 @@ const UI = (() => {
     const t = $("toast");
     t.textContent = text; t.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { t.hidden = true; }, 2600);
+    toast._t = setTimeout(() => { t.hidden = true; }, 3000);
   }
 
-  /* ---------- oppstart ---------- */
-  function boot() {
-    const profile = Store.getProfile();
-    const tripId = Store.getLastTrip();
-    if (profile && tripId && tripById(tripId)) openTrip(tripId);
-    else showJoin();
+  /* ───────────────── oppstart ───────────────── */
+  async function boot() {
+    if (!CONFIG.ready) return bootSetup();
+
+    $("bootMsg").textContent = "Kobler til…";
+    const res = await Api.init();
+
+    if (!res.ok) {
+      const profile = Api.getProfile(), last = Api.getLastTrip();
+      if (profile && last) {                       // prøv lagret kopi
+        S.offline = true;
+        return openTrip(last);
+      }
+      $("bootMsg").innerHTML = `Fikk ikke kontakt med serveren.<br>
+        <span style="font-size:13px;color:var(--ink-3)">${esc(res.error || res.reason)}</span><br>
+        <button class="btn" style="margin-top:14px" onclick="location.reload()">Prøv igjen</button>`;
+      return;
+    }
+
+    Api.onChange(() => { if (S.tab === "chat") render(); });
+
+    const profile = Api.getProfile(), last = Api.getLastTrip();
+    if (profile && last) {
+      try { return await openTrip(last); }
+      catch { /* turen finnes ikke lenger */ }
+    }
+    showJoin();
+  }
+
+  function bootSetup() {
+    $("bootMsg").innerHTML = `
+      <b style="font-family:Archivo,sans-serif">Appen mangler serveroppsett</b><br>
+      <span style="font-size:14px;color:var(--ink-2)">Fyll inn prosjektadresse og anon-nøkkel i
+      <code>js/config.js</code>, og kjør <code>supabase/schema.sql</code> i Supabase-prosjektet.
+      Framgangsmåten står i README.</span>`;
   }
 
   function showJoin() {
+    $("bootScreen").hidden = true;
     $("appScreen").hidden = true;
     $("joinScreen").hidden = false;
-    const p = Store.getProfile();
+    const p = Api.getProfile();
     if (p) { $("fFirst").value = p.first; $("fLast").value = p.last; }
   }
 
-  function openTrip(tripId) {
-    S.trip = tripById(tripId);
-    if (!S.trip) return showJoin();
-    Store.setLastTrip(tripId);
-    S.day = Parse.baseDate(S.trip);
-    S.channel = Store.getLastChannel(tripId);
+  async function openTrip(tripId) {
+    $("bootMsg").textContent = "Henter turen…";
+    const trip = await Api.loadTrip(tripId);
+    if (!trip) throw new Error("Fant ikke turen");
+
+    S.trip = trip;
+    S.offline = Boolean(trip.stale);
+    Api.setLastTrip(tripId);
+    S.day = Parse.baseDate(trip) || (trip.days[0] ? trip.days[0].date : null);
+
+    const saved = Api.getLastChannel(tripId);
+    S.channel = trip.channels.some(c => c.id === saved) ? saved : (trip.channels[0] ? trip.channels[0].id : null);
+
+    $("bootScreen").hidden = true;
     $("joinScreen").hidden = true;
     $("appScreen").hidden = false;
-    const p = Store.getProfile();
+
+    const p = Api.getProfile();
     $("avatarText").textContent = p ? p.initials : "–";
+
     render();
+    if (S.tab === "chat") loadChat();
+    Api.myTrips().then(t => { S.trips = t; }).catch(() => {});
   }
 
-  /* ---------- program ---------- */
+  async function loadChat() {
+    if (!S.channel || S.offline) return;
+    try { await Api.loadMessages(S.trip.id, S.channel); render(); }
+    catch (e) { toast("Klarte ikke hente meldinger."); }
+  }
+
+  /* ───────────────── program ───────────────── */
   function nextEvent(trip) {
-    const now = new Date();
-    const t = now.toTimeString().slice(0, 5);
+    const t = new Date().toTimeString().slice(0, 5);
     const d = trip.days.find(x => x.date === today());
     if (d) {
       const item = d.items.find(i => i.t > t);
       if (item) return { day: d, item };
       const nd = trip.days.find(x => x.date > today());
-      if (nd) return { day: nd, item: nd.items[0] };
-      return null;
+      return nd && nd.items[0] ? { day: nd, item: nd.items[0] } : null;
     }
-    const upcoming = trip.days.find(x => x.date >= today());
-    return upcoming ? { day: upcoming, item: upcoming.items[0] } : null;
+    const up = trip.days.find(x => x.date >= today());
+    return up && up.items[0] ? { day: up, item: up.items[0] } : null;
   }
 
   function viewProgram() {
     const trip = S.trip;
+    const leader = trip.role === "leader";
+
+    if (!trip.days.length) {
+      return `<div class="card pad" style="padding:22px;text-align:center">
+        <div class="eyebrow">Tomt program</div>
+        <p class="muted" style="margin:10px 0 16px;color:var(--ink-2)">
+          ${leader ? "Legg inn dagene i turen, så bygger appen resten." : "Reiselederen har ikke lagt inn programmet ennå."}</p>
+        ${leader ? `<button class="btn primary" data-sheet="addday">Legg til første dag</button>` : ""}
+      </div>
+      ${leader ? `<p class="muted">Del turkoden <b class="mono">${esc(trip.code)}</b> med deltakerne så de kan bli med.</p>` : ""}`;
+    }
+
     const ne = nextEvent(trip);
     const started = trip.days.some(d => d.date <= today());
     let head = "";
@@ -98,49 +155,58 @@ const UI = (() => {
       const n = daysUntil(trip.days[0].date);
       head = `<div class="countdown"><div class="eyebrow">Avreise</div>
         <b>${n === 0 ? "I dag" : n === 1 ? "I morgen" : "Om " + n + " dager"}</b>
-        <p class="muted" style="margin-top:4px;color:var(--ink-2)">Første punkt: ${esc(trip.days[0].items[0].title)} kl ${trip.days[0].items[0].t}</p></div>`;
+        <p class="muted" style="margin-top:4px;color:var(--ink-2)">Første punkt: ${esc(trip.days[0].items[0] ? trip.days[0].items[0].title : "ikke lagt inn")}</p></div>`;
     } else {
       const p = ne.item.place ? trip.places[ne.item.place] : null;
-      const sameDay = ne.day.date === today();
       head = `<div class="nextup">
-        <div class="lbl">${sameDay ? "Neste i dag" : "Neste · " + esc(ne.day.label)}</div>
-        <div class="t">${ne.item.t}</div>
+        <div class="lbl">${ne.day.date === today() ? "Neste i dag" : "Neste · " + esc(ne.day.label)}</div>
+        <div class="t">${esc(ne.item.t)}</div>
         <div class="w">${esc(ne.item.title)}</div>
         <div class="p">${p ? esc(p.name) : esc(ne.item.note || "")}</div>
         ${p ? `<div class="acts">
           <a class="btn solid" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Veibeskrivelse</a>
-          <button class="btn" data-sheet="place" data-place="${ne.item.place}">Detaljer</button>
+          <button class="btn" data-sheet="place" data-place="${esc(ne.item.place)}">Detaljer</button>
         </div>` : ""}
       </div>`;
     }
 
     const d = trip.days.find(x => x.date === S.day) || trip.days[0];
     const chips = trip.days.map(x =>
-      `<button class="chip" aria-pressed="${x.date === d.date}" data-day="${x.date}">${x.chip}<span>${x.num}</span></button>`
-    ).join("");
+      `<button class="chip" aria-pressed="${x.date === d.date}" data-day="${esc(x.date)}">${esc(x.chip)}<span>${esc(x.num)}</span></button>`
+    ).join("") + (leader ? `<button class="chip" data-sheet="addday" style="border-style:dashed">+ Dag<span>ny dato</span></button>` : "");
 
-    const rows = d.items.map(i => {
+    const hotel = d.hotel ? trip.places[d.hotel] : null;
+    const rows = d.items.length ? d.items.map(i => {
       const p = i.place ? trip.places[i.place] : null;
-      const isNext = ne && ne.day.date === d.date && ne.item.t === i.t && d.date === today();
-      return `<button class="ev ${isNext ? "now" : ""}" ${p ? `data-sheet="place" data-place="${i.place}"` : "disabled"}>
-        <div class="time">${i.t}${isNext ? "<em>neste</em>" : ""}</div>
+      const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
+      return `<div class="ev ${isNext ? "now" : ""}" ${p ? `data-sheet="place" data-place="${esc(i.place)}" role="button" tabindex="0"` : ""}>
+        <div class="time">${esc(i.t)}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
           <div class="title">${esc(i.title)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
-          <div class="src"><span class="tag">${esc(i.src)}</span></div>
+          ${S.edit ? `<div class="src"><button class="btn danger" style="min-height:34px;padding:5px 10px;font-size:12px" data-delitem="${esc(i.id)}">Slett punkt</button></div>` : ""}
         </div>
-      </button>`;
-    }).join("");
+      </div>`;
+    }).join("") : `<p class="muted" style="padding:16px 0;text-align:center">Ingen punkter denne dagen.</p>`;
 
-    return `${head}
+    return `
+      ${head}
       <div class="chips">${chips}</div>
       <div>
-        <div class="eyebrow" style="margin-bottom:7px">${esc(d.label)} · bor på ${esc(trip.places[d.hotel].name)}</div>
+        <div class="eyebrow" style="margin-bottom:7px;display:flex;justify-content:space-between;gap:8px;align-items:center">
+          <span>${esc(d.label)}${hotel ? " · bor på " + esc(hotel.name) : ""}</span>
+          ${leader ? `<button class="linkbtn" style="font-size:11px" data-edit>${S.edit ? "Ferdig" : "Rediger"}</button>` : ""}
+        </div>
         <div class="card pad"><div class="tl">${rows}</div></div>
-      </div>`;
+      </div>
+      ${leader ? `<div class="stack">
+        <button class="btn primary" data-sheet="additem" data-day="${esc(d.id)}">Legg til programpunkt</button>
+        <button class="btn" data-sheet="hotel" data-day="${esc(d.id)}">${hotel ? "Bytt hotell denne dagen" : "Sett hotell denne dagen"}</button>
+        ${S.edit ? `<button class="btn danger" data-delday="${esc(d.id)}">Slett hele dagen</button>` : ""}
+      </div>` : ""}`;
   }
 
-  /* ---------- chat ---------- */
+  /* ───────────────── chat ───────────────── */
   function actionCard(a) {
     const p = S.trip.places[a.place];
     if (!p) return "";
@@ -158,60 +224,37 @@ const UI = (() => {
   }
 
   function viewChat() {
-    const list = Store.channels(S.trip.id);
-    const chips = list.map(c =>
-      `<button class="chip" aria-pressed="${c.id === S.channel}" data-channel="${c.id}">${esc(c.name)}<span>${esc(c.sub || "")}</span></button>`
+    const chips = S.trip.channels.map(c =>
+      `<button class="chip" aria-pressed="${c.id === S.channel}" data-channel="${esc(c.id)}">${esc(c.name)}<span>${esc(c.sub || "")}</span></button>`
     ).join("") + `<button class="chip" data-sheet="newchannel" style="border-style:dashed">+ Ny chat<span>i denne turen</span></button>`;
 
-    const msgs = Store.messages(S.trip.id, S.channel);
-    const body = msgs.length
-      ? msgs.map(m => `<div class="msg ${m.mine ? "me" : ""}">
-          ${m.mine ? "" : `<div class="who">${esc(m.who)}${m.role ? ` <b>· ${esc(m.role)}</b>` : ""}</div>`}
-          <div class="bubble">${esc(m.txt)}</div>
-          <div class="stamp">${esc(dayStamp(m.ts))}</div>
-          ${m.action ? actionCard(m.action) : ""}
-        </div>`).join("")
+    if (!S.channel) {
+      return `<div class="chips">${chips}</div>
+        <p class="muted" style="text-align:center;padding:30px 0">Ingen chatter i turen ennå.</p>`;
+    }
+
+    const msgs = Api.messages(S.channel);
+    const body = msgs.length ? msgs.map(m => `<div class="msg ${m.mine ? "me" : ""}">
+        ${m.mine ? "" : `<div class="who">${esc(m.who)}${m.role ? ` <b>· ${esc(m.role)}</b>` : ""}</div>`}
+        <div class="bubble">${esc(m.txt)}</div>
+        <div class="stamp">${esc(dayStamp(m.ts))}${m.mine ? ` · <button class="linkbtn" style="font-size:10.5px" data-delmsg="${esc(m.id)}">slett</button>` : ""}</div>
+        ${m.action ? actionCard(m.action) : ""}
+      </div>`).join("")
       : `<p class="muted" style="text-align:center;padding:30px 0">Ingen meldinger her ennå. Skriv den første.</p>`;
 
     return `<div class="chips">${chips}</div><div class="msgs" id="msgs">${body}</div>`;
   }
 
-  /* ---------- filer ---------- */
-  function viewFiles() {
-    const trip = S.trip;
-    const rows = trip.files.map(f => `<div class="filerow">
-      <div class="ficon ${f.type}">${f.type.toUpperCase()}</div>
-      <div><div class="nm">${esc(f.name)}</div><div class="sub">${esc(f.by)} · ${esc(f.when)}</div>
-        <div style="margin-top:6px"><span class="tag moss">Lest: ${esc(f.read)}</span></div></div>
-    </div>`).join("");
-
-    const points = trip.days.reduce((n, d) => n + d.items.length, 0);
-    const addresses = Object.keys(trip.places).length;
-    const hotels = new Set(trip.days.map(d => d.hotel)).size;
-
-    return `
-      <div>
-        <div class="eyebrow" style="margin-bottom:8px">Hentet ut av filene</div>
-        <div class="card pad" style="padding-block:12px">
-          <dl class="kv">
-            <dt>Punkter</dt><dd>${points} programpunkter over ${trip.days.length} dager</dd>
-            <dt>Hoteller</dt><dd>${hotels}</dd>
-            <dt>Adresser</dt><dd>${addresses} steder med veibeskrivelse</dd>
-          </dl>
-        </div>
-      </div>
-      <div class="card pad">${rows}</div>
-      <p class="muted">Reiselederne laster opp program, romlister og billetter. Opplasting og filtolkning kobles på sammen med resten av serverdelen.</p>`;
-  }
-
-  /* ---------- meg ---------- */
+  /* ───────────────── meg ───────────────── */
   function viewMe() {
-    const p = Store.getProfile();
-    const trips = Store.joinedTripIds().map(tripById).filter(Boolean);
-    const rows = trips.map(t => `<button class="listrow" data-opentrip="${t.id}" aria-current="${t.id === S.trip.id}">
-      <div class="grow"><div class="nm">${esc(t.name)}</div><div class="sub">${esc(t.org)} · ${esc(t.dates)}</div></div>
-      <span class="chev">${ICON.chev}</span>
-    </button>`).join("");
+    const p = Api.getProfile();
+    const trip = S.trip;
+    const rows = S.trips.length
+      ? S.trips.map(t => `<button class="listrow" data-opentrip="${esc(t.id)}" aria-current="${t.id === trip.id}">
+          <div class="grow"><div class="nm">${esc(t.name)}</div>
+            <div class="sub">${esc([t.org, t.dates].filter(Boolean).join(" · "))}${t.role === "leader" ? " · du er reiseleder" : ""}</div></div>
+          <span class="chev">${ICON.chev}</span></button>`).join("")
+      : `<p class="muted" style="padding:12px 0">Henter turene dine…</p>`;
 
     return `
       <div>
@@ -219,10 +262,18 @@ const UI = (() => {
         <div class="card pad" style="padding-block:14px">
           <dl class="kv">
             <dt>Navn</dt><dd>${esc(p ? p.name : "—")}</dd>
-            <dt>Turkode</dt><dd class="mono">${esc(S.trip.code)}</dd>
-            <dt>Reiseleder</dt><dd>${esc(S.trip.leaders)}</dd>
+            <dt>Rolle</dt><dd>${trip.role === "leader" ? "Reiseleder" : "Deltaker"}</dd>
           </dl>
         </div>
+      </div>
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Turkode</div>
+        <div class="card pad" style="padding-block:14px;display:flex;align-items:center;gap:12px;justify-content:space-between">
+          <b class="mono" style="font-size:24px;letter-spacing:.1em">${esc(trip.code)}</b>
+          <button class="btn quiet" data-copy="${esc(trip.code)}">Kopier</button>
+        </div>
+        <p class="muted" style="margin-top:7px">Alle med denne koden kan bli med på turen og lese alt som skrives.</p>
       </div>
 
       <div>
@@ -232,96 +283,89 @@ const UI = (() => {
 
       <div class="stack">
         <button class="btn" data-sheet="jointrip">Bli med på en ny tur</button>
+        <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
         <button class="btn" data-sheet="about">Om appen og personvern</button>
-        <button class="btn danger" id="resetBtn">Logg ut og slett alt på denne enheten</button>
-      </div>
-
-      <p class="muted">Meldinger lagres foreløpig bare på denne enheten. Andre ser dem ikke før serverdelen er koblet på.</p>`;
+        <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
+        <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
+      </div>`;
   }
 
-  /* ---------- tegning ---------- */
+  /* ───────────────── tegning ───────────────── */
   function render() {
+    if (!S.trip) return;
     $("tripName").textContent = S.trip.name;
-    $("tripSub").textContent = `${S.trip.org} · ${S.trip.dates}`;
+    $("tripSub").textContent = [S.trip.org, S.trip.dates].filter(Boolean).join(" · ") || ("Kode " + S.trip.code);
 
-    const sc = $("screen");
-    sc.innerHTML = S.tab === "program" ? viewProgram()
-                 : S.tab === "chat" ? viewChat()
-                 : S.tab === "filer" ? viewFiles()
-                 : viewMe();
+    $("banner").innerHTML = S.offline
+      ? `<div class="offlinebar">Ingen forbindelse — viser sist lagrede program. Meldinger sendes ikke.</div>` : "";
+
+    $("screen").innerHTML = S.tab === "program" ? viewProgram()
+                          : S.tab === "chat" ? viewChat()
+                          : viewMe();
 
     const slot = $("composerSlot");
-    if (S.tab === "chat") {
-      const ch = Store.channels(S.trip.id).find(c => c.id === S.channel);
+    if (S.tab === "chat" && S.channel && !S.offline) {
+      const ch = S.trip.channels.find(c => c.id === S.channel);
       slot.innerHTML = `<form class="composer" id="composer">
-        <input id="msgInput" placeholder="Melding til ${esc(ch ? ch.name : "chatten")}…" autocomplete="off" enterkeyhint="send">
+        <input id="msgInput" placeholder="Melding til ${esc(ch ? ch.name : "chatten")}…" autocomplete="off" enterkeyhint="send" maxlength="2000">
         <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
       </form>`;
       $("composer").addEventListener("submit", onSend);
-      sc.scrollTop = sc.scrollHeight;
-    } else {
-      slot.innerHTML = "";
-    }
+      const sc = $("screen"); sc.scrollTop = sc.scrollHeight;
+    } else slot.innerHTML = "";
 
     $("tabbar").innerHTML = [
-      ["program","Program",ICON.cal], ["chat","Chat",ICON.chat],
-      ["filer","Filer",ICON.file], ["meg","Meg",ICON.me]
+      ["program","Program",ICON.cal], ["chat","Chat",ICON.chat], ["meg","Meg",ICON.me]
     ].map(([id,label,ic]) =>
       `<button role="tab" aria-selected="${S.tab === id}" data-tab="${id}">${ic}<span>${label}</span></button>`
     ).join("");
   }
 
-  /* ---------- send melding ---------- */
-  function onSend(e) {
+  /* ───────────────── send melding ───────────────── */
+  async function onSend(e) {
     e.preventDefault();
     const inp = $("msgInput");
     const txt = inp.value.trim();
-    if (!txt) return;
-    const p = Store.getProfile();
-    const msg = {
-      id: "m" + Date.now().toString(36),
-      who: p ? p.name : "Du", role: "", txt,
-      ts: new Date().toISOString(), mine: true
-    };
-    Store.addMessage(S.trip.id, S.channel, msg);
+    if (!txt || S.busy) return;
     inp.value = "";
-    render();
-
-    const found = Parse.analyse(S.trip, txt);
-    if (found) {
-      Store.updateMessage(S.trip.id, S.channel, msg.id, { action: found });
-      setTimeout(() => { if (S.tab === "chat") render(); }, 450);
+    const action = Parse.analyse(S.trip, txt);
+    try {
+      await Api.sendMessage(S.trip.id, S.channel, txt, action);
+      render();
+    } catch (err) {
+      inp.value = txt;
+      toast("Meldingen ble ikke sendt. Sjekk nettet.");
     }
   }
 
-  /* ---------- ark ---------- */
-  function openSheet(html) {
-    $("sheet").innerHTML = `<div class="grab"></div>${html}`;
-    $("sheetBg").hidden = false;
-  }
+  /* ───────────────── ark ───────────────── */
+  function openSheet(html) { $("sheet").innerHTML = `<div class="grab"></div>${html}`; $("sheetBg").hidden = false; }
   function closeSheet() { $("sheetBg").hidden = true; }
 
   function sheetPlace(id) {
     const p = S.trip.places[id];
+    if (!p) return;
     openSheet(`
       <div class="eyebrow">${esc(p.kind)}</div>
       <h3>${esc(p.name)}</h3>
-      <div class="addr">${esc(p.addr)}</div>
-      <div class="acts">
+      <div class="addr">${esc(p.addr || "Ingen adresse lagt inn")}</div>
+      ${p.addr ? `<div class="acts">
         <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
         <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
-      </div>
+      </div>` : ""}
       <button class="btn close" data-close>Lukk</button>`);
   }
 
   function sheetTrips() {
-    const trips = Store.joinedTripIds().map(tripById).filter(Boolean);
-    const rows = trips.map(t => `<button class="listrow" data-opentrip="${t.id}" aria-current="${t.id === S.trip.id}">
-      <div class="grow"><div class="nm">${esc(t.name)}</div><div class="sub">${esc(t.dates)}</div></div>
+    const rows = S.trips.map(t => `<button class="listrow" data-opentrip="${esc(t.id)}" aria-current="${t.id === S.trip.id}">
+      <div class="grow"><div class="nm">${esc(t.name)}</div><div class="sub">${esc(t.dates || t.org || "")}</div></div>
       <span class="chev">${ICON.chev}</span></button>`).join("");
     openSheet(`<h3>Dine turer</h3>
-      <div class="list" style="margin-top:8px">${rows}</div>
-      <button class="btn" style="width:100%;margin-top:12px" data-sheet="jointrip">Bli med på en ny tur</button>
+      <div class="list" style="margin-top:8px">${rows || '<p class="muted">Henter…</p>'}</div>
+      <div class="stack" style="margin-top:12px">
+        <button class="btn" data-sheet="jointrip">Bli med på en ny tur</button>
+        <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
+      </div>
       <button class="btn close" data-close>Lukk</button>`);
   }
 
@@ -330,19 +374,90 @@ const UI = (() => {
       <p class="muted" style="margin:6px 0 14px">Skriv turkoden du fikk av reiselederen.</p>
       <form id="joinTripForm">
         <div class="field"><label for="jCode">Turkode</label>
-          <input id="jCode" autocapitalize="characters" spellcheck="false" style="font-family:'IBM Plex Mono',monospace;text-transform:uppercase"></div>
+          <input id="jCode" autocapitalize="characters" spellcheck="false" class="mono" style="text-transform:uppercase"></div>
         <p class="err" id="jErr" hidden></p>
         <button class="btn primary big" type="submit">Bli med</button>
       </form>
       <button class="btn close" data-close>Avbryt</button>`);
-    $("joinTripForm").addEventListener("submit", e => {
+
+    $("joinTripForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const trip = tripByCode($("jCode").value);
-      if (!trip) { $("jErr").textContent = "Fant ingen tur med den koden."; $("jErr").hidden = false; return; }
-      Store.joinTrip(trip);
-      closeSheet();
-      openTrip(trip.id);
-      toast("Du er med på " + trip.name);
+      const p = Api.getProfile();
+      try {
+        const trip = await Api.joinByCode($("jCode").value, p ? p.name : "Deltaker");
+        closeSheet();
+        S.trips = await Api.myTrips().catch(() => S.trips);
+        await openTrip(trip.id);
+        toast("Du er med på " + trip.name);
+      } catch (err) {
+        $("jErr").textContent = err.message; $("jErr").hidden = false;
+      }
+    });
+  }
+
+  function sheetNewTrip() {
+    const p = Api.getProfile();
+    const tplOptions = TEMPLATES.map(t =>
+      `<label class="pick"><input type="radio" name="tpl" value="${esc(t.key)}">
+        <span><b>${esc(t.name)}</b> — ${esc(t.lengthLabel)}<br><small>${esc(t.blurb)}</small></span></label>`).join("");
+
+    openSheet(`<h3>Lag en ny tur</h3>
+      <p class="muted" style="margin:6px 0 14px">Du blir reiseleder og får en turkode å dele ut.</p>
+      <form id="newTripForm">
+        ${p ? "" : `<div class="field"><label for="tFirst">Ditt fornavn</label><input id="tFirst"></div>
+                    <div class="field"><label for="tLast">Ditt etternavn</label><input id="tLast"></div>`}
+        <div class="field"><label for="tName">Navn på turen</label><input id="tName" placeholder="Berlin 2027"></div>
+        <div class="field"><label for="tOrg">Klasse eller gruppe</label><input id="tOrg" placeholder="2STB Nordvang vgs"></div>
+        <div class="field"><label for="tDates">Når</label><input id="tDates" placeholder="5.–9. oktober"></div>
+        <div class="field">
+          <label>Start med</label>
+          <div class="picks">
+            <label class="pick"><input type="radio" name="tpl" value="" checked>
+              <span><b>Tomt program</b><br><small>Du legger inn dagene selv.</small></span></label>
+            ${tplOptions}
+          </div>
+        </div>
+        <p class="err" id="tErr" hidden></p>
+        <button class="btn primary big" type="submit" id="tSubmit">Opprett turen</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("newTripForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const btn = $("tSubmit");
+      const err = $("tErr");
+      let prof = Api.getProfile();
+      if (!prof) {
+        const f = $("tFirst").value.trim(), l = $("tLast").value.trim();
+        if (!f || !l) { err.textContent = "Skriv navnet ditt."; err.hidden = false; return; }
+        prof = Api.setProfile(f, l);
+      }
+      const name = $("tName").value.trim();
+      if (!name) { err.textContent = "Turen trenger et navn."; err.hidden = false; return; }
+
+      const key = (document.querySelector('input[name="tpl"]:checked') || {}).value;
+      const tpl = TEMPLATES.find(t => t.key === key) || null;
+
+      btn.disabled = true; btn.textContent = tpl ? "Lager turen og programmet…" : "Lager turen…";
+      try {
+        let dates = $("tDates").value.trim();
+        let plan = null;
+        if (tpl) { plan = templateDates(tpl); if (!dates) dates = plan.label; }
+
+        const trip = await Api.createTrip({
+          name, org: $("tOrg").value.trim(), dates, leaderName: prof.name
+        });
+        if (tpl) await Api.applyTemplate(trip.id, tpl, plan.dates);
+
+        closeSheet();
+        S.trips = await Api.myTrips().catch(() => S.trips);
+        S.tab = "program";
+        await openTrip(trip.id);
+        toast("Turen er laget. Kode: " + trip.code);
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Opprett turen";
+        err.textContent = e2.message; err.hidden = false;
+      }
     });
   }
 
@@ -355,15 +470,153 @@ const UI = (() => {
         <button class="btn primary big" type="submit">Opprett chat</button>
       </form>
       <button class="btn close" data-close>Avbryt</button>`);
-    $("newChForm").addEventListener("submit", e => {
+
+    $("newChForm").addEventListener("submit", async e => {
       e.preventDefault();
       const name = $("cName").value.trim();
       if (!name) return;
-      const id = Store.addChannel(S.trip.id, name, $("cSub").value);
-      S.channel = id;
-      Store.setLastChannel(S.trip.id, id);
-      closeSheet();
-      render();
+      try {
+        const id = await Api.addChannel(S.trip.id, name, $("cSub").value.trim());
+        S.channel = id; Api.setLastChannel(S.trip.id, id);
+        closeSheet(); render(); loadChat();
+      } catch { toast("Klarte ikke lage chatten."); }
+    });
+  }
+
+  function sheetAddDay() {
+    const last = S.trip.days[S.trip.days.length - 1];
+    let suggested = today();
+    if (last) { const d = new Date(last.date + "T12:00:00"); d.setDate(d.getDate() + 1); suggested = d.toISOString().slice(0, 10); }
+
+    openSheet(`<h3>Legg til dag</h3>
+      <form id="addDayForm">
+        <div class="field"><label for="dDate">Dato</label><input id="dDate" type="date" value="${suggested}"></div>
+        <p class="err" id="dErr" hidden></p>
+        <button class="btn primary big" type="submit">Legg til</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("addDayForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const date = $("dDate").value;
+      if (!date) return;
+      try {
+        await Api.addDay(S.trip.id, date);
+        closeSheet();
+        S.day = date;
+        await openTrip(S.trip.id);
+      } catch (err) {
+        $("dErr").textContent = String(err.message).includes("duplicate") ? "Den datoen finnes allerede." : err.message;
+        $("dErr").hidden = false;
+      }
+    });
+  }
+
+  function placeOptions(selected) {
+    return Object.values(S.trip.places)
+      .sort((a, b) => a.name.localeCompare(b.name, "nb"))
+      .map(p => `<option value="${esc(p.id)}" ${p.id === selected ? "selected" : ""}>${esc(p.name)}</option>`).join("");
+  }
+
+  function sheetAddItem(dayId) {
+    const day = S.trip.days.find(d => d.id === dayId);
+    openSheet(`<h3>Nytt programpunkt</h3>
+      <p class="muted" style="margin:6px 0 14px">${esc(day ? day.label : "")}</p>
+      <form id="addItemForm">
+        <div class="field"><label for="iTime">Klokkeslett</label><input id="iTime" type="time" value="09:00"></div>
+        <div class="field"><label for="iTitle">Hva skjer</label><input id="iTitle" placeholder="Omvisning Berlinmuren"></div>
+        <div class="field">
+          <label for="iPlace">Sted</label>
+          <select id="iPlace" class="select">
+            <option value="">Ingen / ikke stedfestet</option>
+            ${placeOptions(null)}
+            <option value="__new">+ Nytt sted…</option>
+          </select>
+        </div>
+        <div id="newPlaceFields" hidden>
+          <div class="field"><label for="pName">Navn på stedet</label><input id="pName" placeholder="Gedenkstätte Berliner Mauer"></div>
+          <div class="field"><label for="pAddr">Adresse</label><input id="pAddr" placeholder="Bernauer Straße 111, 13355 Berlin"></div>
+          <div class="field"><label for="pKind">Type</label>
+            <select id="pKind" class="select">
+              <option>Sted</option><option>Hotell</option><option>Museum</option>
+              <option>Attraksjon</option><option>Stasjon</option><option>Flyplass</option><option>Restaurant</option>
+            </select></div>
+          <p class="muted" style="margin:-4px 0 14px">Adressen er det kartet navigerer til — skriv den så nøyaktig du kan.</p>
+        </div>
+        <div class="field"><label for="iNote">Notat (valgfritt)</label><input id="iNote" placeholder="Møtes igjen 13:45"></div>
+        <p class="err" id="iErr" hidden></p>
+        <button class="btn primary big" type="submit" id="iSubmit">Legg til punktet</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("iPlace").addEventListener("change", e => {
+      $("newPlaceFields").hidden = e.target.value !== "__new";
+    });
+
+    $("addItemForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const err = $("iErr"), btn = $("iSubmit");
+      const title = $("iTitle").value.trim();
+      if (!title) { err.textContent = "Skriv hva som skjer."; err.hidden = false; return; }
+      btn.disabled = true; btn.textContent = "Lagrer…";
+      try {
+        let placeId = $("iPlace").value || null;
+        if (placeId === "__new") {
+          const pn = $("pName").value.trim();
+          if (!pn) throw new Error("Stedet trenger et navn.");
+          placeId = await Api.addPlace(S.trip.id, {
+            name: pn, addr: $("pAddr").value.trim(), kind: $("pKind").value
+          });
+        }
+        await Api.addItem(S.trip.id, dayId, {
+          t: $("iTime").value, title, placeId, note: $("iNote").value.trim()
+        });
+        closeSheet();
+        await openTrip(S.trip.id);
+      } catch (e2) {
+        btn.disabled = false; btn.textContent = "Legg til punktet";
+        err.textContent = e2.message; err.hidden = false;
+      }
+    });
+  }
+
+  function sheetHotel(dayId) {
+    const day = S.trip.days.find(d => d.id === dayId);
+    openSheet(`<h3>Hotell ${esc(day ? day.label : "")}</h3>
+      <p class="muted" style="margin:6px 0 14px">Dette er stedet appen mener når noen skriver «hotellet» denne dagen.</p>
+      <form id="hotelForm">
+        <div class="field">
+          <label for="hPlace">Velg sted</label>
+          <select id="hPlace" class="select">
+            <option value="">Ingen</option>
+            ${placeOptions(day ? day.hotel : null)}
+            <option value="__new">+ Nytt hotell…</option>
+          </select>
+        </div>
+        <div id="hNewFields" hidden>
+          <div class="field"><label for="hName">Navn</label><input id="hName" placeholder="Hotel Moabit Plaza"></div>
+          <div class="field"><label for="hAddr">Adresse</label><input id="hAddr" placeholder="Stromstraße 62, 10551 Berlin"></div>
+        </div>
+        <p class="err" id="hErr" hidden></p>
+        <button class="btn primary big" type="submit">Lagre</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("hPlace").addEventListener("change", e => { $("hNewFields").hidden = e.target.value !== "__new"; });
+
+    $("hotelForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      try {
+        let id = $("hPlace").value || null;
+        if (id === "__new") {
+          const n = $("hName").value.trim();
+          if (!n) throw new Error("Hotellet trenger et navn.");
+          id = await Api.addPlace(S.trip.id, { name: n, addr: $("hAddr").value.trim(), kind: "Hotell" });
+        }
+        await Api.setHotel(dayId, id);
+        closeSheet();
+        await openTrip(S.trip.id);
+      } catch (e2) { $("hErr").textContent = e2.message; $("hErr").hidden = false; }
     });
   }
 
@@ -374,56 +627,104 @@ const UI = (() => {
         et møtested i chatten, kobler appen det mot programmet og finner riktig adresse for den dagen.</p>
       <div class="card pad" style="padding-block:12px;margin-top:6px">
         <dl class="kv">
-          <dt>Versjon</dt><dd>Tidlig utgave under utprøving</dd>
-          <dt>Lagring</dt><dd>Kun på denne enheten — ingenting sendes til noen server</dd>
-          <dt>Kart</dt><dd>Adressen åpnes i Google Maps eller Apple Maps</dd>
+          <dt>Lagring</dt><dd>Program og meldinger ligger i en database. Du ser bare turer du er medlem av.</dd>
+          <dt>Pålogging</dt><dd>Enheten din får en anonym identitet. Navnet er selvvalgt.</dd>
+          <dt>Kart</dt><dd>Adressen åpnes i Google Maps eller Apple Maps.</dd>
         </dl>
       </div>
-      <p class="muted" style="margin-top:12px">Turkoden er en nøkkel til et rom, ikke innlogging.
-      Ordentlig pålogging, tilgangsstyring og sletting av data kommer når serverdelen bygges.</p>
+      <p class="muted" style="margin-top:12px">Turkoden er en nøkkel til et rom. Alle som har den kan bli
+      med og lese alt som skrives i turen — del den bare med dem som skal være med, og lag en ny tur
+      hvis koden kommer på avveie.</p>
       <button class="btn close" data-close>Lukk</button>`);
   }
 
-  /* ---------- hendelser ---------- */
-  document.addEventListener("click", e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-fill],#tripBtn,#meBtn,#resetBtn");
+  /* ───────────────── hendelser ───────────────── */
+  document.addEventListener("click", async e => {
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],#tripBtn,#meBtn,#resetBtn");
     if (!t) return;
 
-    if (t.dataset.fill) { $("fCode").value = t.dataset.fill; return; }
     if (t.hasAttribute("data-close")) return closeSheet();
     if (t.id === "tripBtn") return sheetTrips();
     if (t.id === "meBtn") { S.tab = "meg"; return render(); }
+    if (t.hasAttribute("data-edit")) { S.edit = !S.edit; return render(); }
+
     if (t.id === "resetBtn") {
-      if (confirm("Slette navn, turer og alle meldinger på denne enheten?")) { Store.reset(); location.reload(); }
+      if (confirm("Logge ut på denne enheten? Turene ligger igjen i basen, og du kommer inn igjen med turkoden.")) {
+        Api.signOutLocal(); location.reload();
+      }
       return;
     }
-    if (t.dataset.opentrip) { closeSheet(); S.tab = "program"; return openTrip(t.dataset.opentrip); }
-    if (t.dataset.tab) { S.tab = t.dataset.tab; return render(); }
-    if (t.dataset.day) { S.day = t.dataset.day; return render(); }
-    if (t.dataset.channel) { S.channel = t.dataset.channel; Store.setLastChannel(S.trip.id, S.channel); return render(); }
 
-    switch (t.dataset.sheet) {
-      case "place": return sheetPlace(t.dataset.place);
-      case "jointrip": return sheetJoinTrip();
-      case "newchannel": return sheetNewChannel();
-      case "about": return sheetAbout();
+    if (t.dataset.copy) {
+      try { await navigator.clipboard.writeText(t.dataset.copy); toast("Turkoden er kopiert."); }
+      catch { toast("Kopiering ble blokkert — merk koden manuelt."); }
+      return;
     }
+
+    if (t.dataset.opentrip) { closeSheet(); S.tab = "program"; return openTrip(t.dataset.opentrip).catch(() => toast("Klarte ikke åpne turen.")); }
+    if (t.dataset.tab) { S.tab = t.dataset.tab; render(); if (S.tab === "chat") loadChat(); return; }
+    if (t.dataset.channel) { S.channel = t.dataset.channel; Api.setLastChannel(S.trip.id, S.channel); render(); return loadChat(); }
+
+    if (t.dataset.delitem) {
+      if (!confirm("Slette dette punktet?")) return;
+      try { await Api.deleteItem(t.dataset.delitem); await openTrip(S.trip.id); }
+      catch { toast("Klarte ikke slette."); }
+      return;
+    }
+    if (t.dataset.delday) {
+      if (!confirm("Slette hele dagen med alle punktene?")) return;
+      try { await Api.deleteDay(t.dataset.delday); S.day = null; await openTrip(S.trip.id); }
+      catch { toast("Klarte ikke slette."); }
+      return;
+    }
+    if (t.dataset.delmsg) {
+      try { await Api.deleteMessage(t.dataset.delmsg, S.channel); render(); }
+      catch { toast("Klarte ikke slette meldingen."); }
+      return;
+    }
+    if (t.dataset.leave) {
+      if (!confirm("Melde deg av turen? Du kommer inn igjen med turkoden.")) return;
+      try {
+        await Api.leaveTrip(t.dataset.leave);
+        S.trips = await Api.myTrips().catch(() => []);
+        if (S.trips.length) { S.tab = "program"; await openTrip(S.trips[0].id); }
+        else { Api.setLastTrip(null); showJoin(); }
+      } catch { toast("Klarte ikke melde deg av."); }
+      return;
+    }
+
+    // ark
+    if (t.dataset.sheet === "place") return sheetPlace(t.dataset.place);
+    if (t.dataset.sheet === "jointrip") return sheetJoinTrip();
+    if (t.dataset.sheet === "newtrip") return sheetNewTrip();
+    if (t.dataset.sheet === "newchannel") return sheetNewChannel();
+    if (t.dataset.sheet === "addday") return sheetAddDay();
+    if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
+    if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
+    if (t.dataset.sheet === "about") return sheetAbout();
+
+    if (t.dataset.day) { S.day = t.dataset.day; return render(); }
   });
 
   $("sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") closeSheet(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
-  $("joinForm").addEventListener("submit", e => {
+  $("joinForm").addEventListener("submit", async e => {
     e.preventDefault();
     const first = $("fFirst").value.trim(), last = $("fLast").value.trim();
-    const err = $("joinErr");
+    const err = $("joinErr"), btn = $("joinSubmit");
     if (!first || !last) { err.textContent = "Skriv både fornavn og etternavn."; err.hidden = false; return; }
-    const trip = tripByCode($("fCode").value);
-    if (!trip) { err.textContent = "Fant ingen tur med den koden. Sjekk med reiselederen."; err.hidden = false; return; }
-    err.hidden = true;
-    Store.setProfile(first, last);
-    Store.joinTrip(trip);
-    openTrip(trip.id);
+    err.hidden = true; btn.disabled = true; btn.textContent = "Blir med…";
+    try {
+      Api.setProfile(first, last);
+      const trip = await Api.joinByCode($("fCode").value, `${first} ${last}`);
+      S.trips = await Api.myTrips().catch(() => []);
+      await openTrip(trip.id);
+    } catch (e2) {
+      err.textContent = e2.message; err.hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = "Bli med på turen";
+    }
   });
 
   return { boot };

@@ -216,6 +216,26 @@ button,input,select,textarea{font:inherit;color:inherit}
 .sheet .acts{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:15px}
 .sheet .close{margin-top:10px;width:100%}
 
+/* ---------- skjema-ekstra ---------- */
+.select{
+  width:100%;border:1px solid var(--line);background:var(--surface);border-radius:11px;
+  padding:13px 14px;font-size:16px;min-height:48px;appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 20px) 21px,calc(100% - 14px) 21px;background-size:6px 6px;background-repeat:no-repeat;
+}
+.picks{display:flex;flex-direction:column;gap:8px}
+.pick{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;
+  padding:12px;cursor:pointer;background:var(--surface)}
+.pick input{margin-top:3px;flex:none;width:18px;height:18px;accent-color:var(--blue)}
+.pick span{font-size:14.5px;line-height:1.35}
+.pick small{color:var(--ink-3);font-size:12.5px}
+.pick:has(input:checked){border-color:var(--blue);background:var(--blue-soft)}
+
+.offlinebar{background:var(--amber-soft);color:var(--ink);font-size:13px;padding:9px 16px;
+  border-bottom:1px solid var(--line-soft);font-weight:600}
+
+.ev[role="button"]{cursor:pointer}
+
 .toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--ground);padding:11px 16px;border-radius:11px;font-size:14px;font-weight:600;
   box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;text-align:center}
