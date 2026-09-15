@@ -758,10 +758,11 @@ const UI = (() => {
       chipsEtter.scrollLeft = chipsScroll;
       const valgt = chipsEtter.querySelector('[aria-pressed="true"]');
       if (valgt) {
+        // Rull akkurat så langt at knappen så vidt er inne, ikke til midten.
         const v = valgt.getBoundingClientRect(), c = chipsEtter.getBoundingClientRect();
-        if (v.left < c.left || v.right > c.right) {
-          chipsEtter.scrollLeft += v.left - c.left - (c.width - v.width) / 2;
-        }
+        const marg = 14;
+        if (v.left < c.left + marg) chipsEtter.scrollLeft -= (c.left + marg) - v.left;
+        else if (v.right > c.right - marg) chipsEtter.scrollLeft += v.right - (c.right - marg);
       }
     }
 
@@ -822,9 +823,10 @@ const UI = (() => {
   /* ───────────────── ark ───────────────── */
   function openSheet(html) {
     const s = $("sheet");
-    s.innerHTML = `<div class="grabsone"><div class="grab"></div></div>${html}`;
+    s.innerHTML = `<div class="grabsone"><div class="grab"></div></div><div class="sheetbody">${html}</div>`;
     s.style.transform = "";
-    s.scrollTop = 0;
+    const kropp0 = s.querySelector(".sheetbody");
+    if (kropp0) kropp0.scrollTop = 0;
     $("sheetBg").hidden = false;
   }
   function closeSheet() {
@@ -848,9 +850,12 @@ const UI = (() => {
       // Draghaandtaket oeverst virker alltid, ogsaa i lange ark man har
       // skrollet i. Ellers kan man dra i innholdet naar arket staar oeverst.
       const iHandtak = !!e.target.closest(".grabsone");
+      const kropp = s.querySelector(".sheetbody");
       if (!iHandtak) {
         if (e.target.closest("input, textarea, select, button, a, [contenteditable]")) return;
-        if (s.scrollTop > 0) return;
+        // Draget starter når innholdet alt står øverst — da betyr et
+        // nedtrekk «lukk», ikke «skroll».
+        if (kropp && kropp.scrollTop > 0) return;
       }
       kandidat = true; dragging = false;
       startY = e.clientY; dy = 0;
