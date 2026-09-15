@@ -165,10 +165,19 @@ const UI = (() => {
   }
 
 
+
+  /* Hvilket sted representerer dagen når punktet selv ikke har ett med
+     koordinater? Hotellet om det er satt, ellers det første stedet på
+     dagen som faktisk har en værmelding. Samme by, samme vær. */
+  function dagensSted(d) {
+    if (d.hotel && Api.vaerFor(d.hotel)) return d.hotel;
+    const m = d.items.find(i => i.place && Api.vaerFor(i.place));
+    return m ? m.place : (d.hotel || null);
+  }
   /* Dagens vær, vist ved siden av datoen: formiddag og ettermiddag der
      gruppen bor eller skal være. Det er «været der du skal den dagen». */
   function dagensVaer(d) {
-    const sted = d.hotel || (d.items.find(i => i.place) || {}).place;
+    const sted = dagensSted(d);
     if (!sted) return "";
     const f = Api.vaerPunkt(sted, d.date, "09:00");
     const e = Api.vaerPunkt(sted, d.date, "15:00");
@@ -221,7 +230,7 @@ const UI = (() => {
       head = `<div class="nextup">
         <div class="lbl">${ne.day.date === today() ? "Neste i dag" : "Neste · " + esc(ne.day.label)}</div>
         <div class="t">${esc(ne.item.t)}</div>
-        <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, ne.day.hotel)}</div>
+        <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
         <div class="p">${p ? esc(p.name) : esc(ne.item.note || "")}</div>
         ${p ? `<div class="acts">
           <a class="btn solid" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Veibeskrivelse</a>
@@ -236,13 +245,14 @@ const UI = (() => {
     ).join("") + (leader ? `<button class="chip" data-sheet="addday" style="border-style:dashed">+ Dag<span>ny dato</span></button>` : "");
 
     const hotel = d.hotel ? trip.places[d.hotel] : null;
+    const reserveSted = dagensSted(d);
     const rows = d.items.length ? d.items.map((i, k) => {
       const p = i.place ? trip.places[i.place] : null;
       const isNext = ne && ne.day.date === d.date && ne.item.id === i.id && d.date === today();
       return `<div class="ev ${isNext ? "now" : ""}" data-item="${esc(i.id)}" role="button" tabindex="0">
         <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
-          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t, d.hotel)}</div>
+          <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t, reserveSted)}</div>
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
           ${S.edit ? `<div class="redigerrad">
             <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
