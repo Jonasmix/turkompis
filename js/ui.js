@@ -643,8 +643,11 @@ const UI = (() => {
               : esc(Api.minEpost() || "Innlogget")}</dd>
           </dl>
         </div>
-        ${Api.erAnonym() ? `<button class="btn primary" style="width:100%;margin-top:10px" data-sheet="koblepost">Sikre kontoen med e-post</button>
-          <p class="muted" style="margin-top:7px">Som gjest bor kontoen din i denne nettleseren. Bytter du telefon eller tømmer nettleserdata, er turene borte.</p>` : ""}
+        ${Api.erAnonym()
+          ? `<button class="btn primary" style="width:100%;margin-top:10px" data-sheet="koblepost">Sikre kontoen med e-post</button>
+             <p class="muted" style="margin-top:7px">Som gjest bor kontoen din i denne nettleseren. Bytter du telefon eller tømmer nettleserdata, er turene borte.</p>`
+          : `<button class="btn" style="width:100%;margin-top:10px" data-sheet="koblepost">Bytt e-postadresse</button>
+             <p class="muted" style="margin-top:7px">Du får en kode til den nye adressen. Kontoen, turene og rollene dine følger med.</p>`}
       </div>
 
       <div>
@@ -1593,9 +1596,12 @@ const UI = (() => {
      man alt har. Begge går i to steg — adresse, så kode fra e-posten. */
   function sheetEpost(modus) {
     const kobler = modus === "koble";
-    openSheet(`<h3>${kobler ? "Sikre kontoen med e-post" : "Logg inn med e-post"}</h3>
+    const harAlt = kobler && !Api.erAnonym();
+    openSheet(`<h3>${harAlt ? "Bytt e-postadresse" : kobler ? "Sikre kontoen med e-post" : "Logg inn med e-post"}</h3>
       <p class="muted" style="margin:6px 0 14px">
-        ${kobler
+        ${harAlt
+          ? `Du er innlogget som <b>${esc(Api.minEpost() || "")}</b>. Skriv den nye adressen, så sender vi en kode dit.`
+          : kobler
           ? "Du beholder turene og rollene dine. Med e-post kan du logge inn på en annen telefon, og du mister ikke alt hvis denne blir borte."
           : "Vi sender en sekssifret kode. Ingen passord å huske."}</p>
       <form id="epostForm">
