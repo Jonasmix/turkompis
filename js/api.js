@@ -180,6 +180,15 @@ const Api = (() => {
         sb.from("items").select("*").eq("trip_id", tripId),
         sb.from("channels").select("*").eq("trip_id", tripId).order("created_at")
       ]);
+      // Ingen medlemsrad betyr at du ikke er med på turen lenger — enten
+      // fjernet av en reiseleder, eller så meldte du deg av et annet sted.
+      // Det er noe helt annet enn dårlig nett, og skal ikke ende med at
+      // appen viser en gammel kopi som om alt var som før.
+      if (member.error && member.error.code === "PGRST116") {
+        glemTur(tripId);
+        throw Object.assign(new Error("Du er ikke med på denne turen lenger."),
+                            { kjent: true, utmeldt: true });
+      }
       for (const r of [trip, member, places, days, items, channels]) if (r.error) throw r.error;
 
       const built = build(trip.data, member.data, places.data, days.data, items.data, channels.data);
@@ -187,10 +196,25 @@ const Api = (() => {
       lsSet(LS.snapshot(tripId), built);
       return built;
     } catch (e) {
+      if (e && e.utmeldt) throw e;
       const snap = loadSnapshot(tripId);
       if (snap) { snap.stale = true; return snap; }
       throw e;
     }
+  }
+
+  /* Slett det appen har liggende om en tur på denne enheten. Brukes når
+     du ikke er med lenger — da skal ikke en kopi bli stående igjen. */
+  function glemTur(tripId) {
+    try {
+      localStorage.removeItem(LS.snapshot(tripId));
+      localStorage.removeItem(LS.lastChannel(tripId));
+      localStorage.removeItem(LS.vaer(tripId));
+      localStorage.removeItem(LS.lest(tripId));
+      if (lsGet(LS.lastTrip, null) === tripId) localStorage.removeItem(LS.lastTrip);
+    } catch { /* uviktig */ }
+    if (cache.trip && cache.trip.id === tripId) cache.trip = null;
+    if (liveTrip === tripId) kobleFra();
   }
 
   function loadSnapshot(tripId) {
@@ -1281,7 +1305,7 @@ const Api = (() => {
   return {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
-    myTrips, joinByCode, createTrip, updateTrip, doppChat, flyttTur, antallVentende,
+    myTrips, joinByCode, createTrip, updateTrip, doppChat, flyttTur, antallVentende, glemTur,
     kartValg, settKartValg, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
     settLest, erUlest, antallUleste,

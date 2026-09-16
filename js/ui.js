@@ -255,9 +255,34 @@ const UI = (() => {
 
     $("venterAnnen").addEventListener("click", () => { S.trip = null; S.fraStart = true; showJoin(); });
   }
+  /* Du er ikke med lenger. Si det rett ut, og send folk videre — enten
+     til en annen tur de er med på, eller til skjemaet. Alt appen hadde
+     liggende om turen er allerede slettet fra enheten. */
+  async function utmeldt(melding) {
+    S.trip = null; S.openChat = null; S.side = null;
+    try { S.trips = await Api.myTrips(); } catch { S.trips = []; }
+
+    if (S.trips.length) {
+      await openTrip(S.trips[0].id);
+      toast(melding || "Du er ikke med på turen lenger.");
+      return;
+    }
+    S.fraStart = false;
+    showJoin();
+    toast(melding || "Du er ikke med på turen lenger.");
+  }
+
   async function openTrip(tripId) {
     $("bootMsg").innerHTML = venter("Henter turen");
-    const trip = await Api.loadTrip(tripId);
+
+    let trip;
+    try { trip = await Api.loadTrip(tripId); }
+    catch (e) {
+      // Fjernet fra turen: da skal ikke appen bli stående med en gammel
+      // kopi og se ut som om nettet er nede. Kopien er alt slettet.
+      if (e && e.utmeldt) return utmeldt(e.message);
+      throw e;
+    }
     if (!trip) throw new Error("Fant ikke turen");
 
     // Venter du på godkjenning, slipper du ikke inn i appen ennå.
@@ -961,8 +986,8 @@ const UI = (() => {
             <span class="chev">${ICON.chev}</span></button>
 
           ${trip.role === "leader" ? `<button class="listrow" data-sheet="endretur">
-            <div class="grow"><div class="nm">Navn og klasse</div>
-              <div class="sub">${esc(trip.name)}${trip.org ? " · " + esc(trip.org) : ""}</div></div>
+            <div class="grow"><div class="nm">Navn, klasse og dato</div>
+              <div class="sub">${esc(trip.name)}${trip.dates ? " · " + esc(trip.dates) : ""}</div></div>
             <span class="chev">${ICON.chev}</span></button>` : ""}
 
           <button class="listrow" data-copy="${esc(trip.code)}">
@@ -1135,7 +1160,7 @@ const UI = (() => {
     $("tabbar").hidden = Boolean(conv);
     // Merket på Meg teller både ting reiselederen må ordne og at varsler
     // ikke er slått på — begge deler er noe som venter på deg.
-    const antall = oppgaver().length + (varslerErAv() ? 1 : 0);
+    const antall = oppgaver().length + (varslerErAv() ? 1 : 0) + (S.ventende ? 1 : 0);
     const uleste = Api.antallUleste(S.trip.id);
     const merke = id =>
       id === "meg" && antall ? `<span class="varsel">${antall}</span>`
@@ -2534,8 +2559,8 @@ const UI = (() => {
   function sheetEndreTur() {
     const t = S.trip;
     openSheet(`<h3>Endre turen</h3>
-      <p class="muted" style="margin:6px 0 14px">Navnet vises øverst i appen og i
-        varsler. Turkoden endrer seg ikke.</p>
+      <p class="muted" style="margin:6px 0 14px">Navn, klasse og når turen starter.
+        Turkoden endrer seg ikke.</p>
       <form id="turForm">
         <div class="field"><label for="tuNavn">Navn på turen</label>
           <input id="tuNavn" value="${esc(t.name)}" maxlength="80"></div>
