@@ -1325,6 +1325,12 @@ const UI = (() => {
         if (kontroll(mål)) return false;
         const k = kroppen();
         if (k && k.scrollTop > 0) return false;   // skroll, ikke lukk
+
+        // Bare øverst i arket. Står du midt i et skjema og skal treffe et
+        // felt, skal ikke hele arket henge etter fingeren fordi du bommet
+        // på en etikett.
+        const rute = s.getBoundingClientRect();
+        if (y - rute.top > 140) return false;
       }
       kandidat = true; drar = false; startY = y; dy = 0;
       return true;

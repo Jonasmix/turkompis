@@ -14,7 +14,7 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<link rel="stylesheet" href="styles.css?v=70">
+<link rel="stylesheet" href="styles.css?v=71">
 </head>
 <body>
 
@@ -100,12 +100,12 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=70"></script>
-<script src="vendor/supabase.js?v=70"></script>
-<script src="js/templates.js?v=70"></script>
-<script src="js/api.js?v=70"></script>
-<script src="js/parse.js?v=70"></script>
-<script src="js/ui.js?v=70"></script>
+<script src="js/config.js?v=71"></script>
+<script src="vendor/supabase.js?v=71"></script>
+<script src="js/templates.js?v=71"></script>
+<script src="js/api.js?v=71"></script>
+<script src="js/parse.js?v=71"></script>
+<script src="js/ui.js?v=71"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —
@@ -113,23 +113,36 @@
 // nettleseren faktisk viser, og setter høyden selv.
 (function appHoyde() {
   let sist = 0;
+  let tastatur = false;
+
   const sett = () => {
     const vv = window.visualViewport;
-    const h = Math.round(vv ? vv.height : window.innerHeight);
-    // Små endringer er ikke verdt en ny utregning av hele layouten.
-    if (Math.abs(h - sist) < 2) return;
+    const full = window.innerHeight || (vv ? vv.height : 0);
+    if (!full) return;
+
+    // Er tastaturet oppe, skal appen ende der tastaturet begynner. Er det
+    // nede, fyller den skjermen. Ingenting imellom.
+    const apent = Boolean(vv) && vv.height < full - 120;
+    let h = Math.round(apent ? vv.height : full);
+
+    // Et lite eller null-tall her ville gjort appen usynlig. Skjer det —
+    // og iOS gjør av og til nettopp det midt i en animasjon — er det
+    // bedre å bruke hele skjermen enn å vise en tom flate.
+    if (h < full * 0.35) h = Math.round(full);
+
+    // Med tastaturet oppe flytter iOS utsnittet mens du blar. Da skal vi
+    // ikke regne om noe: gjorde vi det, kjempet layouten mot fingeren din
+    // og lista sto stille.
+    if (apent === tastatur && Math.abs(h - sist) < 2) return;
+    tastatur = apent;
     sist = h;
     document.documentElement.style.setProperty("--app-h", h + "px");
   };
+
   sett();
   addEventListener("resize", sett);
   addEventListener("orientationchange", () => setTimeout(sett, 200));
   addEventListener("pageshow", sett);
-
-  // Bare når høyden faktisk endrer seg — ikke når siden flytter seg.
-  // Med tastaturet oppe flytter iOS den visuelle utsnittet mens du blar,
-  // og målte vi på nytt for hver eneste flytting, kjempet layouten mot
-  // fingeren din og listen sto stille.
   if (window.visualViewport) visualViewport.addEventListener("resize", sett);
 })();
 
