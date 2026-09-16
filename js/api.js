@@ -14,7 +14,7 @@ const Api = (() => {
   let liveTrip = null;           // hvilken tur abonnementet gjelder
   let reaSub = null;             // abonnement på reaksjoner i én chat
   let reaKanal = null;
-  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {}, mer: {} };
+  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {}, mer: {}, varsel: null };
   const SIDE = 300;              // meldinger per bunke
   const listeners = new Set();
 
@@ -511,7 +511,115 @@ const Api = (() => {
     const list = cache.messages[channelId] || (cache.messages[channelId] = []);
     if (!list.some(m => m.id === data.id)) { list.push(shape(data)); }
     cache.recent[channelId] = { txt: data.txt, who: data.author_name, ts: data.created_at, mine: true };
+    varsleOmMelding(data.id);
     return data.id;
+  }
+
+  /* ───────── varsler ─────────
+     Selve sendingen skjer på serveren: den hemmelige nøkkelen kan ikke
+     ligge i en nettside, og én deltaker skal ikke kunne se hvem andre som
+     varsles. Herfra sier vi bare fra at det kom en melding. */
+  async function varsleOmMelding(messageId) {
+    try {
+      const { data } = await sb.auth.getSession();
+      if (!data.session) return;
+      await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
+        method: "POST",
+        keepalive: true,             // rekker fram selv om du lukker appen
+        headers: {
+          "Authorization": "Bearer " + data.session.access_token,
+          "apikey": CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ messageId })
+      });
+    } catch { /* uten varsel er meldingen like fullt sendt */ }
+  }
+
+  const kanVarsle = () =>
+    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+  /* «umulig» — nettleseren kan det ikke (iPhone i Safari uten å ha lagt
+     appen på hjemskjermen), «avslaatt» — du har sagt nei én gang og må
+     snu det i innstillingene, ellers av eller på. */
+  async function varselStatus() {
+    if (!kanVarsle()) return "umulig";
+    if (Notification.permission === "denied") return "avslaatt";
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      return sub ? "paa" : "av";
+    } catch { return "umulig"; }
+  }
+
+  function tilBytes(b64) {
+    const pad = "=".repeat((4 - b64.length % 4) % 4);
+    const raa = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raa, c => c.charCodeAt(0));
+  }
+
+  async function slaaPaaVarsler() {
+    if (!kanVarsle()) throw new Error("Denne nettleseren kan ikke vise varsler.");
+    if (!CONFIG.vapidPublicKey) throw new Error("Varsler er ikke satt opp ennå.");
+
+    const lov = await Notification.requestPermission();
+    if (lov !== "granted") throw new Error("Du må si ja til varsler for at de skal virke.");
+
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: tilBytes(CONFIG.vapidPublicKey)
+      });
+    }
+    const j = sub.toJSON();
+    const { error } = await sb.rpc("lagre_push", {
+      p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth
+    });
+    if (error) throw friendly(error);
+  }
+
+  async function slaaAvVarsler() {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    const { endpoint } = sub.toJSON();
+    await sub.unsubscribe().catch(() => {});
+    await sb.from("push_subs").delete().eq("endpoint", endpoint);
+  }
+
+  /* Nivåene ligger i basen, ikke på telefonen: bytter du telefon, skal
+     du slippe å sette alt på nytt. Ingen rad betyr «viktig». */
+  async function lastVarselvalg(tripId) {
+    const { data, error } = await sb.from("varselvalg")
+      .select("channel_id, niva").eq("trip_id", tripId);
+    if (error) return (cache.varsel = {});
+    const m = { tur: "viktig", chat: {} };
+    for (const r of (data || [])) {
+      if (r.channel_id) m.chat[r.channel_id] = r.niva; else m.tur = r.niva;
+    }
+    cache.varsel = m;
+    return m;
+  }
+
+  const varselvalg = () => cache.varsel || { tur: "viktig", chat: {} };
+
+  const varselNiva = channelId => {
+    const v = varselvalg();
+    return (channelId && v.chat[channelId]) || v.tur;
+  };
+
+  async function settVarselNiva(tripId, channelId, niva) {
+    const { error } = await sb.rpc("sett_varselniva", {
+      p_trip: tripId, p_channel: channelId || null, p_niva: niva
+    });
+    if (error) throw friendly(error);
+    const v = varselvalg();
+    if (channelId) {
+      if (niva === "folg") delete v.chat[channelId]; else v.chat[channelId] = niva;
+    } else v.tur = niva === "folg" ? "viktig" : niva;
+    cache.varsel = v;
   }
 
   async function deleteMessage(id, channelId) {
@@ -929,6 +1037,7 @@ const Api = (() => {
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal,
+    varselStatus, slaaPaaVarsler, slaaAvVarsler, lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
     hentNavnFraTurer, loggUt
   };

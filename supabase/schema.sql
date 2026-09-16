@@ -861,3 +861,82 @@ create trigger brems_chatter before insert on public.channels
   for each row execute function public.brems_chatter();
 
 notify pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 12 — varsler, og hva hver enkelt vil bli varslet om
+-- ═══════════════════════════════════════════════════════════════
+
+-- Én rad per enhet som har sagt ja til varsler. Nøklene her er det
+-- nettleseren gir oss; de sier ingenting om hvem du er, og kan bare
+-- brukes til å sende varsler til akkurat den nettleseren.
+create table if not exists public.push_subs (
+  endpoint   text primary key,
+  user_id    uuid not null default auth.uid(),
+  p256dh     text not null,
+  auth       text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subs_user_idx on public.push_subs (user_id);
+
+alter table public.push_subs enable row level security;
+drop policy if exists ps_own on public.push_subs;
+create policy ps_own on public.push_subs for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Hva du vil varsles om. Én rad per tur, og eventuelt én per chat som
+-- skal være annerledes enn resten av turen. Ingen rad = «viktig».
+--   alt    — hver melding
+--   viktig — reiseledere, svar på dine meldinger, og møtesteder
+--   ingen  — ingenting
+create table if not exists public.varselvalg (
+  user_id    uuid not null default auth.uid(),
+  trip_id    uuid not null references public.trips(id) on delete cascade,
+  channel_id uuid references public.channels(id) on delete cascade,
+  niva       text not null check (niva in ('alt', 'viktig', 'ingen'))
+);
+
+-- channel_id er tom for hele turen, og tomme verdier teller ikke som like
+-- i en vanlig unik indeks. Derfor sammenliknes de gjennom coalesce.
+create unique index if not exists varselvalg_unik on public.varselvalg
+  (user_id, trip_id, coalesce(channel_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+alter table public.varselvalg enable row level security;
+drop policy if exists vv_own on public.varselvalg;
+create policy vv_own on public.varselvalg for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Samme enhet kan ha vært brukt av en annen konto før. Da må den gamle
+-- raden vike, ellers ville varsler fortsatt gått til forrige innlogging.
+create or replace function public.lagre_push(p_endpoint text, p_p256dh text, p_auth text)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  delete from public.push_subs where endpoint = p_endpoint;
+  insert into public.push_subs (endpoint, user_id, p256dh, auth)
+  values (p_endpoint, auth.uid(), p_p256dh, p_auth);
+  return true;
+end; $$;
+
+-- Sett nivå for en tur (p_channel tom) eller for én chat. «folg» sletter
+-- raden, slik at chatten følger turen igjen.
+create or replace function public.sett_varselniva(p_trip uuid, p_channel uuid, p_niva text)
+returns boolean language plpgsql set search_path = public as $$
+declare v_tom uuid := '00000000-0000-0000-0000-000000000000';
+begin
+  if auth.uid() is null then raise exception 'ikke_innlogget'; end if;
+  delete from public.varselvalg
+   where user_id = auth.uid() and trip_id = p_trip
+     and coalesce(channel_id, v_tom) = coalesce(p_channel, v_tom);
+  if p_niva in ('alt', 'viktig', 'ingen') then
+    insert into public.varselvalg (trip_id, channel_id, niva)
+    values (p_trip, p_channel, p_niva);
+  end if;
+  return true;
+end; $$;
+
+revoke all on function public.lagre_push(text, text, text) from public;
+revoke all on function public.sett_varselniva(uuid, uuid, text) from public;
+grant execute on function public.lagre_push(text, text, text) to authenticated;
+grant execute on function public.sett_varselniva(uuid, uuid, text) to authenticated;
+
+notify pgrst, 'reload schema';

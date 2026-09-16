@@ -421,6 +421,12 @@ label.person span{flex:1;min-width:0}
 }
 .eldreknapp:active{background:var(--surface-2)}
 
+/* Liten nivåvelger inne i en rad — brukes per chat i varselinnstillingene */
+.minivalg{
+  width:auto;flex:none;padding:7px 30px 7px 11px;font-size:13.5px;min-height:36px;
+  background-position:calc(100% - 17px) 16px,calc(100% - 11px) 16px;
+}
+
 /* ---------- vær ---------- */
 .vaer{
   float:right;margin-left:10px;font-size:13px;color:var(--ink-2);

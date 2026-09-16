@@ -58,6 +58,37 @@ const UI = (() => {
     toast._t = setTimeout(() => { t.hidden = true; }, 3000);
   }
 
+  /* ───────────────── varsel → riktig chat ─────────────────
+     Trykker du på et varsel, følger tur og chat med i adressen. Vi tar
+     dem ut og fjerner dem igjen, så de ikke blir stående og styre hvor
+     appen åpner neste gang. */
+  function lenkemaal(sok) {
+    const p = new URLSearchParams(sok || location.search);
+    const maal = { tur: p.get("tur"), chat: p.get("chat") };
+    if ((maal.tur || maal.chat) && !sok) history.replaceState(null, "", location.pathname);
+    return maal;
+  }
+
+  async function aapneFraVarsel(maal) {
+    if (!maal.tur && !maal.chat) return false;
+    try {
+      if (maal.tur && (!S.trip || S.trip.id !== maal.tur)) await openTrip(maal.tur);
+      if (!S.trip) return false;
+      if (maal.chat && S.trip.channels.some(c => c.id === maal.chat)) {
+        S.tab = "chat";
+        await openChat(maal.chat);
+      } else render();
+      return true;
+    } catch { return false; }
+  }
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", e => {
+      const adresse = e.data && e.data.aapne;
+      if (adresse) aapneFraVarsel(lenkemaal(adresse.replace(/^\?/, "")));
+    });
+  }
+
   /* ───────────────── oppstart ───────────────── */
   async function boot() {
     if (!CONFIG.ready) return bootSetup();
@@ -89,6 +120,10 @@ const UI = (() => {
       if (fersk && fersk.id === S.trip.id) S.trip = fersk;
       render();
     });
+
+    // Kom du hit fra et varsel, skal du havne i chatten varselet gjaldt.
+    const maal = lenkemaal();
+    if ((maal.tur || maal.chat) && await aapneFraVarsel(maal)) return;
 
     const profile = Api.getProfile(), last = Api.getLastTrip();
     if (profile && last) {
@@ -201,6 +236,7 @@ const UI = (() => {
       Api.subscribeTrip(tripId);
       Api.loadRecent(tripId).then(() => { if (S.tab === "chat" && !S.openChat) render(); }).catch(() => {});
       Api.lastVaer(tripId);
+      Api.lastVarselvalg(tripId).catch(() => {});
       S.svarTil = null;
     }
     Api.myTrips().then(t => { S.trips = t; }).catch(() => {});
@@ -820,6 +856,7 @@ const UI = (() => {
 
       <div class="stack">
         <button class="btn" data-sheet="deltakere">Deltakere og roller</button>
+        <button class="btn" data-sheet="varsler">Varsler</button>
         <button class="btn" data-sheet="jointrip">Bli med på en ny tur</button>
         <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
         <button class="btn" data-sheet="about">Om appen og personvern</button>
@@ -1381,8 +1418,21 @@ const UI = (() => {
         ${ch.private
           ? "Privat chat. Bare de som står her kan lese den — reiseledere ser den ikke."
           : "Åpen chat. Alle som er med på turen kan lese og skrive her."}</p>
+      <div class="person" style="margin-bottom:16px">
+        <span>Varsler herfra</span>
+        <select class="select minivalg" id="chatVarsel">
+          <option value="folg" ${!Api.varselvalg().chat[channelId] ? "selected" : ""}>Følg turen</option>
+          ${NIVAER.map(([v, navn]) => `<option value="${v}"
+            ${Api.varselvalg().chat[channelId] === v ? "selected" : ""}>${navn}</option>`).join("")}
+        </select>
+      </div>
       <div id="cmBody">${venter("Henter")}</div>
       <button class="btn close" data-close>Lukk</button>`);
+
+    $("chatVarsel").addEventListener("change", async e => {
+      try { await Api.settVarselNiva(S.trip.id, channelId, e.target.value); toast("Lagret."); }
+      catch (err) { toast(err.message || "Klarte ikke lagre."); }
+    });
 
     if (!ch.private) {
       try {
@@ -2008,6 +2058,111 @@ const UI = (() => {
       toast("Du er logget inn. Bli med på en tur med turkoden.");
     }
   }
+  /* ───────────────── varsler ─────────────────
+     Tre nivåer, fordi «alt» er uutholdelig i en tur med hundre deltakere
+     og «ingenting» gjør at du går glipp av oppmøtetidene. Standard er
+     midt imellom: reiseledere, svar på dine egne meldinger, og meldinger
+     som avtaler et møtested. Hver chat kan settes for seg. */
+  const NIVAER = [
+    ["alt", "Alt", "Hver eneste melding"],
+    ["viktig", "Det viktige", "Reiseledere, svar til deg, og møtesteder"],
+    ["ingen", "Ingenting", "Ingen varsler herfra"]
+  ];
+
+  async function sheetVarsler() {
+    const status = await Api.varselStatus();
+    const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const installert = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+    // På iPhone finnes varsler bare når appen ligger på hjemskjermen.
+    // Det er Apple som bestemmer det, ikke vi — så da sier vi hvordan.
+    const paaHjem = iOS && !installert;
+
+    const topp = paaHjem
+      ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
+           <b style="font-family:Archivo,sans-serif;font-size:14px">Legg appen på hjemskjermen først</b>
+           <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
+             På iPhone kan bare apper på hjemskjermen gi varsler. Trykk delingsknappen
+             nederst i Safari, velg <b>Legg til på Hjem-skjerm</b>, og åpne TourFlow derfra.</p>
+         </div>`
+      : status === "umulig"
+      ? `<p class="muted">Denne nettleseren støtter ikke varsler.</p>`
+      : status === "avslaatt"
+      ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
+           <b style="font-family:Archivo,sans-serif;font-size:14px">Varsler er blokkert</b>
+           <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
+             Du har sagt nei til varsler for denne siden en gang. Det må slås på igjen
+             i nettleserens innstillinger for nettstedet.</p>
+         </div>`
+      : `<button class="btn ${status === "paa" ? "" : "primary"} big" id="varselBryter" style="width:100%">
+           ${status === "paa" ? "Slå av varsler på denne enheten" : "Slå på varsler"}</button>
+         <p class="muted" style="margin-top:8px">
+           ${status === "paa"
+             ? "Varsler kommer til denne enheten. Har du flere enheter, må hver av dem slås på."
+             : "Gjelder bare denne enheten. Valgene under følger kontoen din."}</p>`;
+
+    openSheet(`<h3>Varsler</h3>
+      ${topp}
+      <div id="varselValg" style="margin-top:18px">${venter("Henter innstillinger")}</div>
+      <button class="btn close" data-close>Lukk</button>`);
+
+    const bryter = $("varselBryter");
+    if (bryter) bryter.addEventListener("click", async () => {
+      bryter.disabled = true;
+      bryter.innerHTML = prikker() + (status === "paa" ? " Slår av" : " Slår på");
+      try {
+        if (status === "paa") { await Api.slaaAvVarsler(); toast("Varsler er av på denne enheten."); }
+        else { await Api.slaaPaaVarsler(); toast("Varsler er på."); }
+        sheetVarsler();
+      } catch (e) {
+        bryter.disabled = false;
+        bryter.textContent = status === "paa" ? "Slå av varsler på denne enheten" : "Slå på varsler";
+        toast(e.message || "Det gikk ikke.");
+      }
+    });
+
+    try {
+      await Api.lastVarselvalg(S.trip.id);
+      const turNiva = Api.varselNiva(null);
+
+      $("varselValg").innerHTML = `
+        <div class="eyebrow" style="margin-bottom:8px">Hele turen</div>
+        <div class="picks">
+          ${NIVAER.map(([v, navn, forklaring]) => `<label class="pick">
+            <input type="radio" name="turniva" value="${v}" ${turNiva === v ? "checked" : ""}>
+            <span><b>${navn}</b><br><small>${forklaring}</small></span></label>`).join("")}
+        </div>
+
+        <div class="eyebrow" style="margin:18px 0 8px">Enkeltchatter</div>
+        <div class="memberlist">
+          ${S.trip.channels.map(c => `<div class="person">
+            <span>${esc(c.name)}</span>
+            <select class="select minivalg" data-chatniva="${esc(c.id)}">
+              <option value="folg" ${!Api.varselvalg().chat[c.id] ? "selected" : ""}>Følg turen</option>
+              ${NIVAER.map(([v, navn]) => `<option value="${v}"
+                ${Api.varselvalg().chat[c.id] === v ? "selected" : ""}>${navn}</option>`).join("")}
+            </select>
+          </div>`).join("")}
+        </div>`;
+
+      $("varselValg").addEventListener("change", async ev => {
+        const rad = ev.target;
+        try {
+          if (rad.name === "turniva") {
+            await Api.settVarselNiva(S.trip.id, null, rad.value);
+            toast("Lagret for hele turen.");
+          } else if (rad.dataset.chatniva) {
+            await Api.settVarselNiva(S.trip.id, rad.dataset.chatniva, rad.value);
+            toast("Lagret for chatten.");
+          }
+        } catch (e) { toast(e.message || "Klarte ikke lagre."); }
+      });
+    } catch {
+      $("varselValg").innerHTML = `<p class="muted">Klarte ikke hente innstillingene.
+        Har du kjørt siste SQL?</p>`;
+    }
+  }
+
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
@@ -2125,6 +2280,7 @@ const UI = (() => {
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "deltakere") return sheetTripMembers();
+    if (t.dataset.sheet === "varsler") return sheetVarsler();
     if (t.dataset.sheet === "logginn") return visAuth("logginn");
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();

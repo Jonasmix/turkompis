@@ -9,7 +9,12 @@
 
 const CONFIG = {
   supabaseUrl: "https://uybyyecmiqcqzumahltx.supabase.co",
-  supabaseAnonKey: "sb_publishable_Xfi5jUmR3ST1PoZ0_yy-ew_jaBzBiK_"
+  supabaseAnonKey: "sb_publishable_Xfi5jUmR3ST1PoZ0_yy-ew_jaBzBiK_",
+
+  // Den offentlige halvdelen av varselnøkkelen. Den skal ligge åpent —
+  // den er nettleserens kvittering på at varslene kommer fra oss. Den
+  // hemmelige halvdelen ligger som VAPID_KEYS i Supabase, aldri her.
+  vapidPublicKey: "BBxB85SpJhoaeEegFdxg2nHue6kN_IgMshqoSuh4ORgX2Hg-EvgiNZsziBdjvOW4Ujbwrwm84TOQkiNcd3EHC5c"
 };
 
 CONFIG.ready = Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);

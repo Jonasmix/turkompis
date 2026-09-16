@@ -5,7 +5,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 49;
+const BUILD = 50;
 const CACHE = "tourflow-b" + BUILD;
 
 const SHELL = [
@@ -40,6 +40,41 @@ self.addEventListener("activate", e => {
       .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+/* ───────────────── varsler ─────────────────
+   Dette er den eneste delen av appen som kjører når appen er lukket.
+   Serveren sender en kort tekst hit, og vi viser den. Innholdet er
+   allerede kryptert på veien, og ligger aldri hos Apple eller Google i
+   lesbar form. */
+self.addEventListener("push", e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { /* tomt varsel */ }
+  e.waitUntil(self.registration.showNotification(d.t || "TourFlow", {
+    body: d.b || "",
+    tag: d.tag || "tourflow",          // nye varsel om samme chat erstatter det gamle
+    icon: "icons/icon-192.png",
+    badge: "icons/icon-192.png",
+    data: { url: d.u || "./" }
+  }));
+});
+
+// Trykker du på varselet, skal du havne i riktig chat — i vinduet som
+// allerede er åpent hvis det finnes, ellers i et nytt.
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const maal = (e.notification.data && e.notification.data.url) || "./";
+  e.waitUntil((async () => {
+    const vinduer = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const hjemme = new URL(self.registration.scope);
+    for (const v of vinduer) {
+      if (new URL(v.url).pathname.startsWith(hjemme.pathname)) {
+        v.postMessage({ aapne: maal });
+        return v.focus();
+      }
+    }
+    return self.clients.openWindow(new URL(maal, hjemme).href);
+  })());
 });
 
 self.addEventListener("fetch", e => {
