@@ -1205,6 +1205,10 @@ const UI = (() => {
 
     Api.subscribeTrip(S.trip.id);
     Api.erHer(S.trip.id, S.openChat);
+
+    // Har du vært i innstillingene og skrudd på varsler, skal appen se
+    // det når du kommer tilbake — ikke stå og påstå at de er blokkert.
+    Api.varselStatus().then(s => { if (s !== S.varselStatus) { S.varselStatus = s; render(); } });
     if (S.openChat) {
       Api.subscribeChannel(S.openChat);
       await Api.loadMessages(S.trip.id, S.openChat).catch(() => {});
@@ -2348,7 +2352,18 @@ const UI = (() => {
            <b style="font-family:Archivo,sans-serif;font-size:14px">Varsler er blokkert</b>
            <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
              Du har sagt nei én gang, og da spør ikke nettleseren igjen. Det må slås på
-             for nettstedet i innstillingene — på iPhone under Innstillinger → Varsler → TourFlow.</p>
+             der appen ble lagt til fra:</p>
+           <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;color:var(--ink-2)">
+             <li><b>iPhone:</b> Innstillinger → Varsler → TourFlow.</li>
+             <li><b>Android:</b> både i nettleseren appen ble lagt til fra
+               (innstillinger → nettstedsinnstillinger → varsler → tourflowub.github.io)
+               <i>og</i> for nettleseren selv under Android-innstillinger → Apper.</li>
+           </ul>
+           <p style="margin:9px 0 0;font-size:13.5px;color:var(--ink-2)">
+             Har du alt sagt ja, trykk under. Sitter «blokkert» fortsatt, må appen fjernes
+             fra hjemskjermen og legges til på nytt — den husker svaret fra den gangen den
+             ble lagt til.</p>
+           <button class="btn" style="width:100%;margin-top:12px" id="sjekkTillatelse">Sjekk på nytt</button>
          </div>`
       : `<label class="bryterrad">
            <span class="grow">
@@ -2451,6 +2466,16 @@ const UI = (() => {
   }
 
   function settOppVarsler() {
+    const sjekk = $("sjekkTillatelse");
+    if (sjekk) sjekk.addEventListener("click", async () => {
+      sjekk.disabled = true; sjekk.innerHTML = prikker() + " Sjekker";
+      const foer = S.varselStatus;
+      await aapneVarsler(true);
+      if (S.varselStatus === foer) {
+        toast("Nettleseren svarer fortsatt nei. Prøv å legge appen til på hjemskjermen på nytt.");
+      }
+    });
+
     const bryter = $("varselBryter");
     if (bryter) bryter.addEventListener("change", async () => {
       const paa = S.varselStatus === "paa";
