@@ -523,8 +523,12 @@ label.person span{flex:1;min-width:0}
 }
 .chatikon svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;
   stroke-linecap:round;stroke-linejoin:round}
-.chatnavn b{display:block;font-family:"Archivo",sans-serif;font-weight:600;font-size:14.5px}
-.chatnavn small{display:block;font-size:12px;color:var(--ink-3)}
+/* Navnet over, hva slags chat det er under. Uten denne står de på samme
+   linje, fordi .person gjør alle spennene sine om til flex-rader. */
+.person .chattekst{display:block;min-width:0}
+.chatnavn b{display:block;font-family:"Archivo",sans-serif;font-weight:600;font-size:14.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chatnavn small{display:block;font-size:12px;color:var(--ink-3);margin-top:1px}
 
 /* Liten nivåvelger inne i en rad — brukes per chat i varselinnstillingene */
 .minivalg{

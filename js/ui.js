@@ -2333,7 +2333,9 @@ const UI = (() => {
       ${topp}
 
       <div>
-        <div class="eyebrow" style="margin:20px 0 8px">Hele turen</div>
+        <div class="eyebrow" style="margin:20px 0 4px">Standard for alle chatter</div>
+        <p class="muted" style="margin:0 0 9px">Gjelder hver chat i turen som ikke har
+          sitt eget valg lenger nede.</p>
         ${nivaliste("turniva", turNiva, "")}
       </div>
 
@@ -2344,9 +2346,9 @@ const UI = (() => {
             ${S.trip.channels.map(c => `<div class="person">
               <span class="chatnavn">
                 <span class="chatikon">${c.private ? "&#128274;" : ICON.chat}</span>
-                <span>
+                <span class="chattekst">
                   <b>${esc(c.name)}</b>
-                  <small>${c.private ? "Privat chat" : "Åpen chat"}</small>
+                  <small>${c.private ? "Privat chat" : "Åpen for alle på turen"}</small>
                 </span>
               </span>
               <select class="select minivalg" data-chatniva="${esc(c.id)}">
