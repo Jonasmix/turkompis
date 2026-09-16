@@ -5,8 +5,9 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 56;
+const BUILD = 57;
 const CACHE = "tourflow-b" + BUILD;
+const MAALCACHE = "tourflow-maal";   // chatten et varsel peker til
 
 const SHELL = [
   "./",
@@ -37,7 +38,11 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // MAALCACHE er ikke gamle filer, men chatten et varsel peker til.
+      // Kommer en ny versjon i det du trykker på varselet, skal målet
+      // fortsatt være der når appen våkner.
+      .then(keys => Promise.all(
+        keys.filter(k => k !== CACHE && k !== MAALCACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -77,8 +82,6 @@ self.addEventListener("push", e => {
    målet legges igjen et sted appen leser når den våkner, det sendes
    direkte til vinduet hvis det finnes, og adressen brukes hvis appen må
    startes. Én av dem treffer alltid. */
-const MAALCACHE = "tourflow-maal";
-
 async function leggIgjenMaal(maal) {
   try {
     const c = await caches.open(MAALCACHE);
