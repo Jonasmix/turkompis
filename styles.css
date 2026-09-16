@@ -421,6 +421,22 @@ label.person span{flex:1;min-width:0}
 }
 .eldreknapp:active{background:var(--surface-2)}
 
+/* Feilsøkingslista på varselsiden: ett ledd i kjeden per rad, så det går
+   an å se hvor det stopper i stedet for å gjette. */
+.sjekkrad{
+  display:flex;align-items:flex-start;gap:11px;padding:11px 2px;
+  border-bottom:1px solid var(--line-soft);font-size:14px;
+}
+.sjekkrad:last-child{border-bottom:0}
+.sjekkrad small{display:block;font-size:12.5px;color:var(--ink-3);margin-top:2px}
+.sjekkja,.sjekknei,.sjekkmidt{
+  flex:none;width:21px;height:21px;border-radius:50%;display:grid;place-items:center;
+  font-size:12px;font-weight:700;margin-top:1px;
+}
+.sjekkja{background:var(--moss);color:#fff}
+.sjekknei{background:var(--amber);color:#fff}
+.sjekkmidt{background:var(--surface-2);color:var(--ink-3)}
+
 /* Liten nivåvelger inne i en rad — brukes per chat i varselinnstillingene */
 .minivalg{
   width:auto;flex:none;padding:7px 30px 7px 11px;font-size:13.5px;min-height:36px;

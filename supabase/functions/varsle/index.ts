@@ -37,12 +37,50 @@ let server: webpush.ApplicationServer | null = null;
 async function appServer() {
   if (server) return server;
   const raa = Deno.env.get("VAPID_KEYS");
-  if (!raa) throw new Error("mangler_vapid");
-  server = await webpush.ApplicationServer.new({
-    contactInformation: "mailto:" + (Deno.env.get("VAPID_KONTAKT") || "post@example.com"),
-    vapidKeys: await webpush.importVapidKeys(JSON.parse(raa), { extractable: false })
-  });
+  if (!raa) throw new Error("VAPID_KEYS mangler under Edge Functions → Secrets.");
+
+  let noekler;
+  try { noekler = JSON.parse(raa); }
+  catch { throw new Error("VAPID_KEYS er ikke gyldig JSON. Lim inn hele filen på én linje."); }
+  if (!noekler?.publicKey || !noekler?.privateKey) {
+    throw new Error("VAPID_KEYS mangler publicKey eller privateKey.");
+  }
+
+  try {
+    server = await webpush.ApplicationServer.new({
+      contactInformation: "mailto:" + (Deno.env.get("VAPID_KONTAKT") || "post@example.com"),
+      vapidKeys: await webpush.importVapidKeys(noekler, { extractable: false })
+    });
+  } catch (e) {
+    throw new Error("Klarte ikke lese VAPID_KEYS: " + (e instanceof Error ? e.message : String(e)));
+  }
   return server;
+}
+
+/* Sender til en bunke enheter og forteller hvordan det gikk. Feiler én
+   enhet, skal de andre likevel få sitt. */
+async function sendTil(
+  tjener: webpush.ApplicationServer,
+  enheter: Array<{ endpoint: string; p256dh: string; auth: string }>,
+  nyttelast: string
+) {
+  let sendt = 0;
+  const doede: string[] = [];
+  const feil: string[] = [];
+
+  await Promise.all(enheter.map(async (e) => {
+    try {
+      await tjener.subscribe({ endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } })
+        .pushTextMessage(nyttelast, { ttl: 3600 });
+      sendt++;
+    } catch (err) {
+      // 410 betyr at nettleseren har kastet abonnementet — da rydder vi.
+      if (err instanceof webpush.PushMessageError && err.isGone()) doede.push(e.endpoint);
+      else feil.push(err instanceof Error ? err.toString() : String(err));
+    }
+  }));
+
+  return { sendt, doede, feil };
 }
 
 Deno.serve(async (req) => {
@@ -52,9 +90,9 @@ Deno.serve(async (req) => {
   const auth = req.headers.get("Authorization");
   if (!auth) return svar({ feil: "Ikke innlogget." }, 401);
 
-  let kropp: { messageId?: string };
+  let kropp: { messageId?: string; test?: boolean };
   try { kropp = await req.json(); } catch { return svar({ feil: "Ugyldig forespørsel." }, 400); }
-  if (!kropp.messageId) return svar({ feil: "Mangler melding." }, 400);
+  if (!kropp.messageId && !kropp.test) return svar({ feil: "Mangler melding." }, 400);
 
   const url = Deno.env.get("SUPABASE_URL")!;
   const somBruker = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, {
@@ -64,6 +102,32 @@ Deno.serve(async (req) => {
   if (!meg?.user) return svar({ feil: "Ikke innlogget." }, 401);
 
   const db = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+  /* Testvarsel til dine egne enheter. Går hele veien — nøkkel, Apple
+     eller Google, og service workeren på telefonen — så et svar herfra
+     sier nøyaktig hvor det eventuelt stopper. */
+  if (kropp.test) {
+    const { data: mine } = await db.from("push_subs")
+      .select("endpoint, p256dh, auth").eq("user_id", meg.user.id);
+    if (!mine || !mine.length) {
+      return svar({ feil: "Ingen enheter har sagt ja til varsler for denne kontoen." }, 400);
+    }
+    let tjener: webpush.ApplicationServer;
+    try { tjener = await appServer(); }
+    catch (e) { return svar({ feil: e instanceof Error ? e.message : String(e) }, 500); }
+
+    const res = await sendTil(tjener, mine, JSON.stringify({
+      t: "TourFlow", b: "Testvarsel — alt virker.", u: "", tag: "test"
+    }));
+    if (res.doede.length) await db.from("push_subs").delete().in("endpoint", res.doede);
+
+    return svar({
+      sendt: res.sendt,
+      enheter: mine.length,
+      utgaatt: res.doede.length,
+      feil: res.feil[0] || null
+    });
+  }
 
   const { data: melding } = await db.from("messages")
     .select("id, trip_id, channel_id, author_id, author_name, txt, action, reply_to")
@@ -143,23 +207,14 @@ Deno.serve(async (req) => {
 
   let tjener: webpush.ApplicationServer;
   try { tjener = await appServer(); }
-  catch { return svar({ feil: "Varsler er ikke satt opp på serveren." }, 500); }
+  catch (e) {
+    console.error("varsel-oppsett:", e);
+    return svar({ feil: "Varsler er ikke satt opp på serveren." }, 500);
+  }
 
-  let sendt = 0;
-  const doede: string[] = [];
+  const res = await sendTil(tjener, enheter, nyttelast);
+  if (res.doede.length) await db.from("push_subs").delete().in("endpoint", res.doede);
+  if (res.feil.length) console.error("varsel-sending:", res.feil[0]);
 
-  await Promise.all(enheter.map(async (e) => {
-    try {
-      await tjener.subscribe({ endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } })
-        .pushTextMessage(nyttelast, { ttl: 3600 });
-      sendt++;
-    } catch (err) {
-      // 410 betyr at nettleseren har kastet abonnementet — da rydder vi.
-      if (err instanceof webpush.PushMessageError && err.isGone()) doede.push(e.endpoint);
-    }
-  }));
-
-  if (doede.length) await db.from("push_subs").delete().in("endpoint", doede);
-
-  return svar({ sendt });
+  return svar({ sendt: res.sendt });
 });

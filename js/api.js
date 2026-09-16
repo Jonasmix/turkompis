@@ -589,6 +589,39 @@ const Api = (() => {
     await sb.from("push_subs").delete().eq("endpoint", endpoint);
   }
 
+  /* Hvilke enheter denne kontoen har påmeldt. Radsikkerheten gjør at du
+     bare ser dine egne — nyttig for å se om påmeldingen faktisk kom fram. */
+  async function varselEnheter() {
+    const { data, error } = await sb.from("push_subs").select("endpoint").eq("user_id", userId);
+    if (error) throw error;
+    return (data || []).map(r => r.endpoint);
+  }
+
+  /* Testvarsel til dine egne enheter, hele veien om serveren. Svaret
+     sier hvor det eventuelt stopper. */
+  async function testVarsel() {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) throw new Error("Du er ikke innlogget.");
+    const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + data.session.access_token,
+        "apikey": CONFIG.supabaseAnonKey,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ test: true })
+    });
+    let svar = null;
+    try { svar = await res.json(); } catch { /* tomt svar */ }
+    if (!res.ok) {
+      throw Object.assign(
+        new Error((svar && svar.feil) || `Serveren svarte ${res.status}. Er «varsle» deployet?`),
+        { kjent: true }
+      );
+    }
+    return svar || {};
+  }
+
   /* Nivåene ligger i basen, ikke på telefonen: bytter du telefon, skal
      du slippe å sette alt på nytt. Ingen rad betyr «viktig». */
   async function lastVarselvalg(tripId) {
@@ -1037,7 +1070,8 @@ const Api = (() => {
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal,
-    varselStatus, slaaPaaVarsler, slaaAvVarsler, lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
+    varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel,
+    lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
     hentNavnFraTurer, loggUt
   };

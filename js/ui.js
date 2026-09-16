@@ -3,7 +3,8 @@
 const UI = (() => {
 
   const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false,
-    nye: 0, sistAntall: 0, beholdSkroll: null };
+    nye: 0, sistAntall: 0, beholdSkroll: null,
+    side: null, varselStatus: null, varselEnheter: null, varselTest: null };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -219,8 +220,9 @@ const UI = (() => {
     Api.setLastTrip(tripId);
     S.day = Parse.baseDate(trip) || (trip.days[0] ? trip.days[0].date : null);
 
-    // Bytter du tur, lukkes samtalen du hadde åpen.
+    // Bytter du tur, lukkes samtalen og sidene du hadde åpne.
     S.openChat = null;
+    S.side = null;
     S.nye = 0; S.sistAntall = 0;
     Api.unsubscribeChannel();
 
@@ -869,13 +871,19 @@ const UI = (() => {
   /* ───────────────── tegning ───────────────── */
   function render() {
     if (!S.trip) return;
-    const conv = S.tab === "chat" && S.openChat
+    const side = S.side;                      // egen side inni appen
+    const conv = !side && S.tab === "chat" && S.openChat
       ? S.trip.channels.find(c => c.id === S.openChat) : null;
 
-    // Når en samtale er åpen bytter toppen til samtalens egen overskrift.
-    $("apphead").hidden = Boolean(conv);
-    $("convhead").hidden = !conv;
-    if (conv) {
+    // Når en samtale eller en egen side er åpen, bytter toppen til dens
+    // egen overskrift med en pil tilbake.
+    $("apphead").hidden = Boolean(conv || side);
+    $("convhead").hidden = !(conv || side);
+    $("convWho").hidden = Boolean(side);
+    if (side) {
+      $("convName").textContent = "Varsler";
+      $("convSub").textContent = S.trip.name;
+    } else if (conv) {
       $("convName").textContent = conv.name;
       $("convSub").textContent = conv.private ? "Privat · bare de som er lagt til" : "Åpen for alle på turen";
       $("convWho").dataset.members = conv.id;
@@ -909,9 +917,11 @@ const UI = (() => {
       S.sistAntall = antall;
     }
 
-    $("screen").innerHTML = S.tab === "program" ? viewProgram()
+    $("screen").innerHTML = side === "varsler" ? viewVarsler()
+                          : S.tab === "program" ? viewProgram()
                           : S.tab === "chat" ? viewChat()
                           : viewMe();
+    if (side === "varsler") settOppVarsler();
 
     const slot = $("composerSlot");
     if (conv && !S.offline) {
@@ -995,7 +1005,10 @@ const UI = (() => {
     return true;
   }
 
-  window.addEventListener("popstate", () => { if (S.openChat) closeChat(true); });
+  window.addEventListener("popstate", () => {
+    if (S.side) return lukkSide(true);
+    if (S.openChat) closeChat(true);
+  });
 
   /* Ligger appen i bakgrunnen, kobler vi fra strømmen av meldinger.
      En telefon i lomma trenger den ikke, og hver pålogget teller: én
@@ -2069,99 +2082,186 @@ const UI = (() => {
     ["ingen", "Ingenting", "Ingen varsler herfra"]
   ];
 
-  async function sheetVarsler() {
-    const status = await Api.varselStatus();
+  /* Varsler har fått sin egen side, ikke et ark: her er det mange valg og
+     en feilsøkingsdel, og et ark man kan dra ned midt i en liste med
+     nedtrekksmenyer blir bare i veien. */
+  async function aapneVarsler(fraHistorikk) {
+    S.side = "varsler";
+    S.varselStatus = null;
+    S.varselEnheter = null;
+    S.varselTest = null;
+    if (!fraHistorikk) history.pushState({ side: "varsler" }, "");
+    render();
+
+    S.varselStatus = await Api.varselStatus();
+    try { await Api.lastVarselvalg(S.trip.id); } catch {}
+    try { S.varselEnheter = await Api.varselEnheter(); } catch {}
+    if (S.side === "varsler") render();
+  }
+
+  function lukkSide(fraHistorikk) {
+    if (!S.side) return false;
+    S.side = null;
+    render();
+    if (!fraHistorikk && history.state && history.state.side) history.back();
+    return true;
+  }
+
+  function viewVarsler() {
+    const st = S.varselStatus;
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const installert = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+    const paaHjem = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+    const turNiva = Api.varselNiva(null);
+    const valg = Api.varselvalg();
 
-    // På iPhone finnes varsler bare når appen ligger på hjemskjermen.
-    // Det er Apple som bestemmer det, ikke vi — så da sier vi hvordan.
-    const paaHjem = iOS && !installert;
-
-    const topp = paaHjem
+    const topp = st === null
+      ? venter("Sjekker")
+      : iOS && !paaHjem
       ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
            <b style="font-family:Archivo,sans-serif;font-size:14px">Legg appen på hjemskjermen først</b>
            <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
-             På iPhone kan bare apper på hjemskjermen gi varsler. Trykk delingsknappen
-             nederst i Safari, velg <b>Legg til på Hjem-skjerm</b>, og åpne TourFlow derfra.</p>
+             På iPhone kan bare apper som ligger på hjemskjermen gi varsler — det er Apple som
+             bestemmer det. Trykk delingsknappen nederst i Safari, velg
+             <b>Legg til på Hjem-skjerm</b>, og åpne TourFlow derfra. Da dukker knappen opp her.</p>
          </div>`
-      : status === "umulig"
-      ? `<p class="muted">Denne nettleseren støtter ikke varsler.</p>`
-      : status === "avslaatt"
+      : st === "umulig"
+      ? `<div class="card pad" style="padding-block:14px">
+           <p class="muted" style="margin:0">Denne nettleseren kan ikke vise varsler.</p></div>`
+      : st === "avslaatt"
       ? `<div class="card pad" style="padding-block:14px;border-left:3px solid var(--amber)">
            <b style="font-family:Archivo,sans-serif;font-size:14px">Varsler er blokkert</b>
            <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
-             Du har sagt nei til varsler for denne siden en gang. Det må slås på igjen
-             i nettleserens innstillinger for nettstedet.</p>
+             Du har sagt nei én gang, og da spør ikke nettleseren igjen. Det må slås på
+             for nettstedet i innstillingene — på iPhone under Innstillinger → Varsler → TourFlow.</p>
          </div>`
-      : `<button class="btn ${status === "paa" ? "" : "primary"} big" id="varselBryter" style="width:100%">
-           ${status === "paa" ? "Slå av varsler på denne enheten" : "Slå på varsler"}</button>
+      : `<button class="btn ${st === "paa" ? "" : "primary"} big" id="varselBryter" style="width:100%">
+           ${st === "paa" ? "Slå av varsler på denne enheten" : "Slå på varsler"}</button>
          <p class="muted" style="margin-top:8px">
-           ${status === "paa"
-             ? "Varsler kommer til denne enheten. Har du flere enheter, må hver av dem slås på."
+           ${st === "paa"
+             ? "Denne enheten er påmeldt. Har du flere enheter, må hver av dem slås på for seg."
              : "Gjelder bare denne enheten. Valgene under følger kontoen din."}</p>`;
 
-    openSheet(`<h3>Varsler</h3>
-      ${topp}
-      <div id="varselValg" style="margin-top:18px">${venter("Henter innstillinger")}</div>
-      <button class="btn close" data-close>Lukk</button>`);
+    const nivaliste = (navn, aktiv, data) => `<div class="picks">
+      ${NIVAER.map(([v, tittel, forklaring]) => `<label class="pick">
+        <input type="radio" name="${navn}" value="${v}" ${aktiv === v ? "checked" : ""} ${data || ""}>
+        <span><b>${tittel}</b><br><small>${forklaring}</small></span></label>`).join("")}
+    </div>`;
 
+    // Feilsøking: hvert ledd i kjeden, slik at det går an å se hvor det
+    // stopper i stedet for å gjette.
+    const linje = (navn, ok, tekst) =>
+      `<div class="sjekkrad"><span class="${ok === null ? "sjekkmidt" : ok ? "sjekkja" : "sjekknei"}">
+         ${ok === null ? "–" : ok ? "✓" : "✕"}</span><span>${navn}<small>${esc(tekst)}</small></span></div>`;
+
+    const enheter = S.varselEnheter;
+
+    return `
+      ${topp}
+
+      <div>
+        <div class="eyebrow" style="margin:20px 0 8px">Hele turen</div>
+        ${nivaliste("turniva", turNiva, "")}
+      </div>
+
+      <div>
+        <div class="eyebrow" style="margin:20px 0 8px">Enkeltchatter</div>
+        <div class="card pad" style="padding:0">
+          <div class="memberlist">
+            ${S.trip.channels.map(c => `<div class="person">
+              <span>${esc(c.name)}</span>
+              <select class="select minivalg" data-chatniva="${esc(c.id)}">
+                <option value="folg" ${!valg.chat[c.id] ? "selected" : ""}>Følg turen</option>
+                ${NIVAER.map(([v, tittel]) => `<option value="${v}"
+                  ${valg.chat[c.id] === v ? "selected" : ""}>${tittel}</option>`).join("")}
+              </select>
+            </div>`).join("")}
+          </div>
+        </div>
+        <p class="muted" style="margin-top:7px">En chat som følger turen, endrer seg med valget over.</p>
+      </div>
+
+      <div>
+        <div class="eyebrow" style="margin:20px 0 8px">Virker det?</div>
+        <div class="card pad" style="padding-block:6px">
+          ${linje("Nettleseren kan varsle", st !== "umulig", st === "umulig" ? "Ikke støttet her" : "Ja")}
+          ${iOS ? linje("Ligger på hjemskjermen", paaHjem, paaHjem ? "Ja" : "Kreves på iPhone") : ""}
+          ${linje("Du har sagt ja", st === "paa" || st === "av" ? st === "paa" : false,
+                  st === "paa" ? "Ja" : st === "avslaatt" ? "Nei, blokkert" : "Ikke slått på")}
+          ${linje("Enheten er lagret i basen",
+                  enheter === null ? null : enheter.length > 0,
+                  enheter === null ? "Sjekker" : enheter.length + " enhet(er) på kontoen din")}
+        </div>
+        <div class="stack" style="margin-top:10px">
+          <button class="btn" id="testLokalt">Vis et varsel fra telefonen</button>
+          <button class="btn" id="testServer">Send testvarsel via serveren</button>
+        </div>
+        ${S.varselTest ? `<div class="card pad" style="padding-block:12px;margin-top:10px;
+             border-left:3px solid var(--${S.varselTest.ok ? "moss" : "amber"})">
+           <p style="margin:0;font-size:13.5px;color:var(--ink-2)">${esc(S.varselTest.tekst)}</p></div>` : ""}
+        <p class="muted" style="margin-top:8px">
+          Den første viser at telefonen kan vise varsler. Den andre går hele veien om serveren,
+          og er den som avslører om noe mangler der. Du får aldri varsel om dine egne meldinger.</p>
+      </div>`;
+  }
+
+  function settOppVarsler() {
     const bryter = $("varselBryter");
     if (bryter) bryter.addEventListener("click", async () => {
+      const paa = S.varselStatus === "paa";
       bryter.disabled = true;
-      bryter.innerHTML = prikker() + (status === "paa" ? " Slår av" : " Slår på");
+      bryter.innerHTML = prikker() + (paa ? " Slår av" : " Slår på");
       try {
-        if (status === "paa") { await Api.slaaAvVarsler(); toast("Varsler er av på denne enheten."); }
+        if (paa) { await Api.slaaAvVarsler(); toast("Varsler er av på denne enheten."); }
         else { await Api.slaaPaaVarsler(); toast("Varsler er på."); }
-        sheetVarsler();
-      } catch (e) {
-        bryter.disabled = false;
-        bryter.textContent = status === "paa" ? "Slå av varsler på denne enheten" : "Slå på varsler";
-        toast(e.message || "Det gikk ikke.");
-      }
+      } catch (e) { toast(e.message || "Det gikk ikke."); }
+      aapneVarsler(true);
     });
 
-    try {
-      await Api.lastVarselvalg(S.trip.id);
-      const turNiva = Api.varselNiva(null);
+    const skjerm = $("screen");
+    skjerm.addEventListener("change", async ev => {
+      const m = ev.target;
+      try {
+        if (m.name === "turniva") {
+          await Api.settVarselNiva(S.trip.id, null, m.value);
+          toast("Lagret for hele turen.");
+          render();
+        } else if (m.dataset.chatniva) {
+          await Api.settVarselNiva(S.trip.id, m.dataset.chatniva, m.value);
+          toast("Lagret for chatten.");
+        }
+      } catch (e) { toast(e.message || "Klarte ikke lagre."); }
+    });
 
-      $("varselValg").innerHTML = `
-        <div class="eyebrow" style="margin-bottom:8px">Hele turen</div>
-        <div class="picks">
-          ${NIVAER.map(([v, navn, forklaring]) => `<label class="pick">
-            <input type="radio" name="turniva" value="${v}" ${turNiva === v ? "checked" : ""}>
-            <span><b>${navn}</b><br><small>${forklaring}</small></span></label>`).join("")}
-        </div>
+    const lokal = $("testLokalt");
+    if (lokal) lokal.addEventListener("click", async () => {
+      try {
+        if (Notification.permission !== "granted") throw new Error("Slå på varsler først.");
+        const reg = await navigator.serviceWorker.ready;
+        await reg.showNotification("TourFlow", {
+          body: "Slik ser et varsel ut.", icon: "icons/icon-192.png", tag: "test"
+        });
+        S.varselTest = { ok: true, tekst: "Telefonen viste varselet. Da virker alt på denne enheten — står det stille likevel når andre skriver, ligger feilen på serveren." };
+      } catch (e) {
+        S.varselTest = { ok: false, tekst: e.message || "Telefonen klarte ikke vise varselet." };
+      }
+      render();
+    });
 
-        <div class="eyebrow" style="margin:18px 0 8px">Enkeltchatter</div>
-        <div class="memberlist">
-          ${S.trip.channels.map(c => `<div class="person">
-            <span>${esc(c.name)}</span>
-            <select class="select minivalg" data-chatniva="${esc(c.id)}">
-              <option value="folg" ${!Api.varselvalg().chat[c.id] ? "selected" : ""}>Følg turen</option>
-              ${NIVAER.map(([v, navn]) => `<option value="${v}"
-                ${Api.varselvalg().chat[c.id] === v ? "selected" : ""}>${navn}</option>`).join("")}
-            </select>
-          </div>`).join("")}
-        </div>`;
-
-      $("varselValg").addEventListener("change", async ev => {
-        const rad = ev.target;
-        try {
-          if (rad.name === "turniva") {
-            await Api.settVarselNiva(S.trip.id, null, rad.value);
-            toast("Lagret for hele turen.");
-          } else if (rad.dataset.chatniva) {
-            await Api.settVarselNiva(S.trip.id, rad.dataset.chatniva, rad.value);
-            toast("Lagret for chatten.");
-          }
-        } catch (e) { toast(e.message || "Klarte ikke lagre."); }
-      });
-    } catch {
-      $("varselValg").innerHTML = `<p class="muted">Klarte ikke hente innstillingene.
-        Har du kjørt siste SQL?</p>`;
-    }
+    const server = $("testServer");
+    if (server) server.addEventListener("click", async () => {
+      server.disabled = true; server.innerHTML = prikker() + " Sender";
+      try {
+        const r = await Api.testVarsel();
+        S.varselTest = r.sendt
+          ? { ok: true, tekst: `Serveren sendte til ${r.sendt} av ${r.enheter} enhet(er). Kommer det ingenting fram nå, er det telefonen som holder det tilbake.` }
+          : { ok: false, tekst: r.feil || "Serveren nådde ingen enheter." };
+      } catch (e) {
+        S.varselTest = { ok: false, tekst: e.message || "Testen nådde ikke serveren." };
+      }
+      render();
+    });
   }
+
 
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
@@ -2192,7 +2292,7 @@ const UI = (() => {
       return $("authInner").querySelector("#kodeForm") ? visAuth(S.trip && !Api.erAnonym() ? "koble" : "logginn") : lukkAuth();
     }
     if (t.hasAttribute("data-close")) return closeSheet();
-    if (t.id === "backBtn") return closeChat();
+    if (t.id === "backBtn") return S.side ? lukkSide() : closeChat();
     if (t.id === "tripBtn") return sheetTrips();
     if (t.id === "meBtn") { S.tab = "meg"; return render(); }
     if (t.hasAttribute("data-edit")) { S.edit = !S.edit; return render(); }
@@ -2211,7 +2311,7 @@ const UI = (() => {
     }
 
     if (t.dataset.opentrip) { closeSheet(); S.tab = "program"; return openTrip(t.dataset.opentrip).catch(() => toast("Klarte ikke åpne turen.")); }
-    if (t.dataset.tab) { S.tab = t.dataset.tab; S.openChat = null; return render(); }
+    if (t.dataset.tab) { S.tab = t.dataset.tab; S.openChat = null; S.side = null; return render(); }
     if (t.dataset.openchat) return openChat(t.dataset.openchat);
 
     if (t.dataset.delitem) {
@@ -2280,7 +2380,7 @@ const UI = (() => {
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "deltakere") return sheetTripMembers();
-    if (t.dataset.sheet === "varsler") return sheetVarsler();
+    if (t.dataset.sheet === "varsler") { closeSheet(); return aapneVarsler(); }
     if (t.dataset.sheet === "logginn") return visAuth("logginn");
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
@@ -2301,6 +2401,7 @@ const UI = (() => {
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
     if (!$("sheetBg").hidden) return closeSheet();
+    if (S.side) return lukkSide();
     closeChat();
   });
 
