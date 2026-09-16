@@ -31,8 +31,8 @@ Appen trenger et Supabase-prosjekt. Gratisplanen holder godt for utprøving.
 
 1. **Lag prosjekt** på [supabase.com](https://supabase.com) → *New project*.
    Velg en **region i EU** (f.eks. Frankfurt) — dette er elevdata.
-2. **Kjør skjemaet.** Åpne *SQL Editor*, lim inn hele [`supabase/schema.sql`](supabase/schema.sql)
-   og kjør. Den lager tabeller, regler for hvem som får lese og skrive, og funksjonene
+2. **Kjør skjemaet.** Åpne *SQL Editor*, lim inn hele `schema.sql` fra det private repoet
+   [TourFlowUB/tourflow-supabase](https://github.com/TourFlowUB/tourflow-supabase) og kjør. Den lager tabeller, regler for hvem som får lese og skrive, og funksjonene
    `join_trip` og `create_trip`.
 3. **Slå på anonym pålogging.** *Authentication → Sign In / Providers → Anonymous sign-ins* → på.
    Hver enhet får da en identitet uten at noen må lage passord.
@@ -69,8 +69,11 @@ Alle stier er relative, så appen virker like godt i en undermappe som på eget 
 | `js/parse.js` | Melding → møtested, dato, klokkeslett |
 | `js/templates.js` | Ferdige turer for «lag eksempeltur» |
 | `js/ui.js` | Skjermer, navigasjon, hendelser |
-| `supabase/schema.sql` | Tabeller, radsikkerhet og funksjoner |
-| `sw.js` | Offline-cache. Bump `CACHE` når du endrer filer |
+| `sw.js` | Offline-cache og varsler. Bump `BUILD` sammen med `?v=` i index.html |
+
+Databaseoppsettet og serverfunksjonene ligger i et eget, privat repo:
+[TourFlowUB/tourflow-supabase](https://github.com/TourFlowUB/tourflow-supabase). Denne
+siden må ligge åpent for at GitHub Pages skal virke — det må ikke serverdelen.
 
 ## Sikkerhet — hva som er på plass
 
