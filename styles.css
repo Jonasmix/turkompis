@@ -514,6 +514,37 @@ label.person span{flex:1;min-width:0}
 .sjekknei{background:var(--amber);color:#fff}
 .sjekkmidt{background:var(--surface-2);color:var(--ink-3)}
 
+/* En bryter leses raskere enn en knapp som skifter tekst: du ser om noe
+   er på uten å lese hva det står. */
+.bryterrad{
+  display:flex;align-items:center;gap:14px;cursor:pointer;
+  border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:14px;
+}
+.bryterrad .grow{flex:1;min-width:0}
+.bryterrad b{display:block;font-family:"Archivo",sans-serif;font-size:15px}
+.bryterrad small{display:block;font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.bryterrad input{position:absolute;opacity:0;pointer-events:none}
+.bryter{
+  flex:none;width:50px;height:30px;border-radius:15px;background:var(--line);
+  position:relative;transition:background .18s;
+}
+.bryter::after{
+  content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(9,15,22,.3);transition:transform .18s;
+}
+.bryterrad input:checked ~ .bryter{background:var(--moss)}
+.bryterrad input:checked ~ .bryter::after{transform:translateX(20px)}
+.bryterrad input:disabled ~ .bryter{opacity:.5}
+
+/* Liten «i» som åpner forklaringen, uten å ta plass fra det den forklarer. */
+.infoknapp{
+  width:19px;height:19px;border-radius:50%;flex:none;cursor:pointer;padding:0;
+  border:1px solid var(--ink-3);background:none;color:var(--ink-3);
+  font-family:"Archivo",sans-serif;font-size:11.5px;font-weight:700;line-height:1;
+  text-transform:none;letter-spacing:0;
+}
+.infoknapp:active{background:var(--surface-2)}
+
 /* En chat i varselinnstillingene skal se ut som en chat, ikke som et
    ord i en liste — ellers er det ikke opplagt hva «Hele turen» er. */
 .chatnavn{display:flex;align-items:center;gap:10px;min-width:0}

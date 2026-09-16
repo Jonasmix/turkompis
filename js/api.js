@@ -773,6 +773,29 @@ const Api = (() => {
     }
   }
 
+  /* Navn og klasse på turen. Turkoden og eierskapet er det en regel i
+     basen som passer på — de skal ikke gå an å endre herfra. */
+  async function updateTrip(tripId, { name, org }) {
+    const rad = {};
+    if (name !== undefined) rad.name = String(name).trim();
+    if (org !== undefined) rad.org = String(org).trim();
+    if (!Object.keys(rad).length) return;
+
+    const { error } = await sb.from("trips").update(rad).eq("id", tripId);
+    if (error) throw friendly(error);
+    if (cache.trip && cache.trip.id === tripId) Object.assign(cache.trip, rad);
+  }
+
+  /* Hvem som får døpe om en chat, avgjøres i basen: en åpen chat hører
+     til reiselederen eller den som laget den, en privat til dem som er
+     med i den. */
+  async function doppChat(channelId, navn) {
+    const { error } = await sb.rpc("dopp_chat", { p_channel: channelId, p_navn: navn });
+    if (error) throw friendly(error);
+    const c = cache.trip && cache.trip.channels.find(x => x.id === channelId);
+    if (c) c.name = String(navn).trim().slice(0, 60);
+  }
+
   /* ───────── chatter ───────── */
   async function addChannel(tripId, name, sub, isPrivate, memberIds) {
     const { data, error } = await sb.rpc("create_channel", {
@@ -1228,7 +1251,7 @@ const Api = (() => {
   return {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
-    myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
+    myTrips, joinByCode, createTrip, updateTrip, doppChat, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
     settLest, erUlest, antallUleste,
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,

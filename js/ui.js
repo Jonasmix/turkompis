@@ -947,6 +947,11 @@ const UI = (() => {
               <div class="sub"${varslerAv ? ' style="color:var(--amber)"' : ""}>${varselTekst}</div></div>
             <span class="chev">${ICON.chev}</span></button>
 
+          ${trip.role === "leader" ? `<button class="listrow" data-sheet="endretur">
+            <div class="grow"><div class="nm">Navn og klasse</div>
+              <div class="sub">${esc(trip.name)}${trip.org ? " · " + esc(trip.org) : ""}</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+
           <button class="listrow" data-copy="${esc(trip.code)}">
             <div class="grow"><div class="nm">Turkode</div>
               <div class="sub">Trykk for å kopiere — alle med koden kan bli med</div></div>
@@ -1573,6 +1578,12 @@ const UI = (() => {
     });
   }
 
+  /* Samme regel som i basen: en åpen chat hører til reiselederen, en
+     privat til dem som er med i den. Appen viser bare knappen til dem
+     det gjelder — basen nekter uansett. */
+  const kanDoppe = ch =>
+    Boolean(ch) && (ch.private ? true : S.trip.role === "leader");
+
   /* Deltakere i én chat — hvem som kan lese den, og hvem du kan legge til. */
   async function sheetChannelMembers(channelId) {
     const ch = S.trip.channels.find(c => c.id === channelId);
@@ -1583,6 +1594,12 @@ const UI = (() => {
         ${ch.private
           ? "Privat chat. Bare de som står her kan lese den — reiseledere ser den ikke."
           : "Åpen chat. Alle som er med på turen kan lese og skrive her."}</p>
+      ${kanDoppe(ch) ? `<button class="listrow" data-sheet="doppchat" data-chat="${esc(channelId)}"
+          style="border-bottom:1px solid var(--line-soft);margin-bottom:4px">
+          <div class="grow"><div class="nm">Endre navn på chatten</div>
+            <div class="sub">${esc(ch.name)}</div></div>
+          <span class="chev">${ICON.chev}</span></button>` : ""}
+
       <div class="person" style="margin-bottom:16px">
         <span>Varsler herfra</span>
         <select class="select minivalg" id="chatVarsel">
@@ -2304,12 +2321,16 @@ const UI = (() => {
              Du har sagt nei én gang, og da spør ikke nettleseren igjen. Det må slås på
              for nettstedet i innstillingene — på iPhone under Innstillinger → Varsler → TourFlow.</p>
          </div>`
-      : `<button class="btn ${st === "paa" ? "" : "primary"} big" id="varselBryter" style="width:100%">
-           ${st === "paa" ? "Slå av varsler på denne enheten" : "Slå på varsler"}</button>
-         <p class="muted" style="margin-top:8px">
-           ${st === "paa"
-             ? "Denne enheten er påmeldt. Har du flere enheter, må hver av dem slås på for seg."
-             : "Gjelder bare denne enheten. Valgene under følger kontoen din."}</p>`;
+      : `<label class="bryterrad">
+           <span class="grow">
+             <b>Varsler på denne enheten</b>
+             <small>${st === "paa"
+               ? "Har du flere enheter, må hver av dem slås på for seg."
+               : "Gjelder bare denne enheten. Valgene under følger kontoen din."}</small>
+           </span>
+           <input type="checkbox" id="varselBryter" ${st === "paa" ? "checked" : ""}>
+           <span class="bryter" aria-hidden="true"></span>
+         </label>`;
 
     const nivaliste = (navn, aktiv, data) => `<div class="picks">
       ${NIVAER.map(([v, tittel, forklaring]) => `<label class="pick">
@@ -2333,14 +2354,20 @@ const UI = (() => {
       ${topp}
 
       <div>
-        <div class="eyebrow" style="margin:20px 0 4px">Standard for alle chatter</div>
+        <div class="eyebrow" style="margin:20px 0 4px;display:flex;align-items:center;gap:7px">
+          <span>Standard for alle chatter</span>
+          <button class="infoknapp" data-sheet="varselinfo" aria-label="Hva betyr valgene?">i</button>
+        </div>
         <p class="muted" style="margin:0 0 9px">Gjelder hver chat i turen som ikke har
           sitt eget valg lenger nede.</p>
         ${nivaliste("turniva", turNiva, "")}
       </div>
 
       <div>
-        <div class="eyebrow" style="margin:20px 0 8px">Chattene på turen</div>
+        <div class="eyebrow" style="margin:20px 0 8px;display:flex;align-items:center;gap:7px">
+          <span>Chattene på turen</span>
+          <button class="infoknapp" data-sheet="varselinfo" aria-label="Hva betyr valgene?">i</button>
+        </div>
         <div class="card pad" style="padding:0">
           <div class="memberlist">
             ${S.trip.channels.map(c => `<div class="person">
@@ -2389,14 +2416,16 @@ const UI = (() => {
 
   function settOppVarsler() {
     const bryter = $("varselBryter");
-    if (bryter) bryter.addEventListener("click", async () => {
+    if (bryter) bryter.addEventListener("change", async () => {
       const paa = S.varselStatus === "paa";
       bryter.disabled = true;
-      bryter.innerHTML = prikker() + (paa ? " Slår av" : " Slår på");
       try {
         if (paa) { await Api.slaaAvVarsler(); toast("Varsler er av på denne enheten."); }
         else { await Api.slaaPaaVarsler(); toast("Varsler er på."); }
-      } catch (e) { toast(e.message || "Det gikk ikke."); }
+      } catch (e) {
+        bryter.checked = paa;                  // si nei, og bryteren går tilbake
+        toast(e.message || "Det gikk ikke.");
+      }
       aapneVarsler(true);
     });
 
@@ -2437,6 +2466,118 @@ const UI = (() => {
   }
 
 
+  /* Hva de fire valgene faktisk betyr. Ordene «alt» og «det viktige»
+     sier lite før noen har sagt hva som er hva. */
+  /* Navn og klasse på turen. Bare reiseledere — og turkoden står i ro,
+     det passer en regel i basen på. */
+  function sheetEndreTur() {
+    const t = S.trip;
+    openSheet(`<h3>Endre turen</h3>
+      <p class="muted" style="margin:6px 0 14px">Navnet vises øverst i appen og i
+        varsler. Turkoden endrer seg ikke.</p>
+      <form id="turForm">
+        <div class="field"><label for="tuNavn">Navn på turen</label>
+          <input id="tuNavn" value="${esc(t.name)}" maxlength="80"></div>
+        <div class="field"><label for="tuOrg">Klasse eller gruppe</label>
+          <input id="tuOrg" value="${esc(t.org || "")}" maxlength="80" placeholder="2STB Tryggheim"></div>
+        <p class="err" id="tuFeil" hidden></p>
+        <button class="btn primary big" type="submit" id="tuLagre">Lagre</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("turForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const navn = $("tuNavn").value.trim();
+      if (!navn) { $("tuFeil").textContent = "Turen trenger et navn."; $("tuFeil").hidden = false; return; }
+      const knapp = $("tuLagre");
+      knapp.disabled = true; knapp.innerHTML = prikker() + " Lagrer";
+      try {
+        await Api.updateTrip(t.id, { name: navn, org: $("tuOrg").value.trim() });
+        closeSheet();
+        await openTrip(t.id);
+        S.trips = await Api.myTrips().catch(() => S.trips);
+        S.tab = "meg"; render();
+        toast("Turen er oppdatert.");
+      } catch (err) {
+        knapp.disabled = false; knapp.textContent = "Lagre";
+        $("tuFeil").textContent = err.message; $("tuFeil").hidden = false;
+      }
+    });
+  }
+
+  /* Døp om en chat. Hvem som får lov, avgjør basen — appen viser bare
+     knappen til dem det gjelder. */
+  function sheetDoppChat(channelId) {
+    const c = S.trip.channels.find(x => x.id === channelId);
+    if (!c) return;
+    openSheet(`<h3>Endre navn</h3>
+      <p class="muted" style="margin:6px 0 14px">${c.private
+        ? "Alle som er med i denne chatten kan endre navnet."
+        : "Chatten er åpen for hele turen, så det er reiselederne som styrer navnet."}</p>
+      <form id="chatNavnForm">
+        <div class="field"><label for="cnNavn">Navn på chatten</label>
+          <input id="cnNavn" value="${esc(c.name)}" maxlength="60"></div>
+        <p class="err" id="cnFeil" hidden></p>
+        <button class="btn primary big" type="submit" id="cnLagre">Lagre</button>
+      </form>
+      <button class="btn close" data-close>Avbryt</button>`);
+
+    $("chatNavnForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const navn = $("cnNavn").value.trim();
+      if (!navn) { $("cnFeil").textContent = "Chatten trenger et navn."; $("cnFeil").hidden = false; return; }
+      const knapp = $("cnLagre");
+      knapp.disabled = true; knapp.innerHTML = prikker() + " Lagrer";
+      try {
+        await Api.doppChat(channelId, navn);
+        closeSheet();
+        await openTrip(S.trip.id);
+        if (S.openChat === channelId) S.tab = "chat";
+        render();
+        toast("Navnet er endret.");
+      } catch (err) {
+        knapp.disabled = false; knapp.textContent = "Lagre";
+        $("cnFeil").textContent = err.message; $("cnFeil").hidden = false;
+      }
+    });
+  }
+
+  function sheetVarselInfo() {
+    openSheet(`<h3>Hva betyr valgene?</h3>
+      <p class="muted" style="margin:6px 0 16px">Varsler kommer bare når du ikke har appen
+        framme. Sitter du i appen, sier den fra selv — og står du i chatten det gjelder,
+        ser du jo meldingen komme.</p>
+
+      <div class="memberlist">
+        <div class="person" style="align-items:flex-start">
+          <span class="chattekst"><b>Alt</b>
+            <small>Hver eneste melding i chatten. Greit i en liten gruppe, men i en chat
+              med hele klassen blir det mange.</small></span>
+        </div>
+        <div class="person" style="align-items:flex-start">
+          <span class="chattekst"><b>Det viktige</b>
+            <small>Tre ting: meldinger fra reiseledere, svar på dine egne meldinger, og
+              meldinger som avtaler et møtested — som «møt på hotellet kl 18:30».
+              Dette er utgangspunktet.</small></span>
+        </div>
+        <div class="person" style="align-items:flex-start">
+          <span class="chattekst"><b>Ingenting</b>
+            <small>Ingen varsler herfra. Meldingene kommer fortsatt; du må bare se etter
+              dem selv.</small></span>
+        </div>
+        <div class="person" style="align-items:flex-start">
+          <span class="chattekst"><b>Følg turen</b>
+            <small>Bare på enkeltchatter: chatten gjør det samme som standardvalget øverst.
+              Endrer du standarden, følger den med.</small></span>
+        </div>
+      </div>
+
+      <p class="muted" style="margin-top:14px">I tillegg varsles du alltid hvis en reiseleder
+        endrer programmet for <b>i dag</b> — ny tid, ny rekkefølge eller en ny dag. Endringer
+        som gjelder senere, varsles ikke.</p>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
   function sheetAbout() {
     openSheet(`<h3>Om appen</h3>
       <p style="margin:10px 0;font-size:14.5px;color:var(--ink-2)">
@@ -2457,7 +2598,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2592,6 +2733,9 @@ const UI = (() => {
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
     if (t.dataset.sheet === "deltakere") { closeSheet(); return aapneDeltakere(); }
     if (t.dataset.sheet === "varsler") { closeSheet(); return aapneVarsler(); }
+    if (t.dataset.sheet === "varselinfo") return sheetVarselInfo();
+    if (t.dataset.sheet === "endretur") return sheetEndreTur();
+    if (t.dataset.sheet === "doppchat") return sheetDoppChat(t.dataset.chat);
     if (t.dataset.sheet === "logginn") return visAuth("logginn");
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
     if (t.dataset.sheet === "skjulte") return sheetSkjulte();
