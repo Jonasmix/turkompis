@@ -270,6 +270,8 @@ const UI = (() => {
       Api.loadRecent(tripId).then(() => { if (S.tab === "chat" && !S.openChat) render(); }).catch(() => {});
       Api.lastVaer(tripId);
       Api.lastVarselvalg(tripId).catch(() => {});
+      // Statusen trengs på Meg-fanen, ikke bare inne på varselsiden.
+      Api.varselStatus().then(s => { if (s !== S.varselStatus) { S.varselStatus = s; render(); } });
       S.svarTil = null;
     }
     Api.myTrips().then(t => { S.trips = t; }).catch(() => {});
@@ -809,9 +811,19 @@ const UI = (() => {
       <button class="btn close" data-close>Lukk</button>`);
   }
 
+  /* Har du ikke slått på varsler, er det verdt et lite merke — ellers
+     sitter folk og lurer på hvorfor telefonen er stille. Det vises bare
+     når det faktisk går an å gjøre noe med. */
+  const varslerErAv = () => S.varselStatus === "av" || S.varselStatus === "avslaatt";
+
   function viewMe() {
     const p = Api.getProfile();
     const trip = S.trip;
+    const varslerAv = varslerErAv();
+    const varselTekst = varslerAv
+      ? (S.varselStatus === "avslaatt" ? "Blokkert i nettleseren" : "Ikke slått på her")
+      : S.varselStatus === "umulig" ? "Ikke mulig i denne nettleseren"
+      : ({ alt: "Alt", viktig: "Det viktige", ingen: "Ingenting" })[Api.varselNiva(null)] || "På";
     const rows = S.trips.length
       ? S.trips.map(t => `<button class="listrow" data-opentrip="${esc(t.id)}" aria-current="${t.id === trip.id}">
           <div class="grow"><div class="nm">${esc(t.name)}</div>
@@ -859,48 +871,74 @@ const UI = (() => {
         </div>`;
 
       })()}
-      <div>
-        <div class="eyebrow" style="margin-bottom:8px">Deg</div>
-        <div class="card pad" style="padding-block:14px">
-          <dl class="kv">
-            <dt>Navn</dt><dd>${esc(p ? p.name : "—")}</dd>
-            <dt>Rolle</dt><dd>${trip.role === "leader" ? "Reiseleder" : "Deltaker"}</dd>
-            <dt>Konto</dt><dd>${Api.erAnonym()
-              ? 'Gjest <span class="tag amber">bare på denne telefonen</span>'
-              : esc(Api.minEpost() || "Innlogget")}</dd>
-          </dl>
-        </div>
-        ${Api.erAnonym()
-          ? `<button class="btn primary" style="width:100%;margin-top:10px" data-sheet="koblepost">Sikre kontoen med e-post</button>
-             <p class="muted" style="margin-top:7px">Som gjest bor kontoen din i denne nettleseren. Bytter du telefon eller tømmer nettleserdata, er turene borte.</p>`
-          : `<button class="btn" style="width:100%;margin-top:10px" data-sheet="koblepost">Bytt e-postadresse</button>
-             <p class="muted" style="margin-top:7px">Du får en kode til den nye adressen. Kontoen, turene og rollene dine følger med.</p>`}
+      <div class="megkort">
+        <span class="megava">${esc(p ? p.initials : "–")}</span>
+        <span class="grow">
+          <b>${esc(p ? p.name : "Du")}</b>
+          <small>${trip.role === "leader" ? "Reiseleder" : "Deltaker"} på ${esc(trip.name)}</small>
+        </span>
+        ${Api.erAnonym() ? '<span class="tag amber">gjest</span>' : ""}
       </div>
 
       <div>
-        <div class="eyebrow" style="margin-bottom:8px">Turkode</div>
-        <div class="card pad" style="padding-block:14px;display:flex;align-items:center;gap:12px;justify-content:space-between">
-          <b class="mono" style="font-size:24px;letter-spacing:.1em">${esc(trip.code)}</b>
-          <button class="btn quiet" data-copy="${esc(trip.code)}">Kopier</button>
-        </div>
-        <p class="muted" style="margin-top:7px">Alle med denne koden kan bli med på turen og lese alt som skrives.</p>
+        <div class="eyebrow" style="margin-bottom:8px">Turen</div>
+        <div class="card pad"><div class="list">
+          <button class="listrow" data-sheet="deltakere">
+            <div class="grow"><div class="nm">Deltakere og roller</div>
+              <div class="sub">Hvem er med, og hvem som er reiseleder</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+
+          <button class="listrow" data-sheet="varsler">
+            <div class="grow"><div class="nm">Varsler${varslerAv ? '<span class="prikkmerke"></span>' : ""}</div>
+              <div class="sub"${varslerAv ? ' style="color:var(--amber)"' : ""}>${varselTekst}</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+
+          <button class="listrow" data-copy="${esc(trip.code)}">
+            <div class="grow"><div class="nm">Turkode</div>
+              <div class="sub">Trykk for å kopiere — alle med koden kan bli med</div></div>
+            <b class="mono" style="font-size:19px;letter-spacing:.09em">${esc(trip.code)}</b></button>
+        </div></div>
       </div>
 
       <div>
         <div class="eyebrow" style="margin-bottom:8px">Dine turer</div>
-        <div class="card pad"><div class="list">${rows}</div></div>
+        <div class="card pad"><div class="list">
+          ${rows}
+          <button class="listrow" data-sheet="jointrip">
+            <div class="grow"><div class="nm">Bli med på en ny tur</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+          <button class="listrow" data-sheet="newtrip">
+            <div class="grow"><div class="nm">Lag en ny tur</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+        </div></div>
       </div>
 
-      <div class="stack">
-        <button class="btn" data-sheet="deltakere">Deltakere og roller</button>
-        <button class="btn" data-sheet="varsler">Varsler</button>
-        <button class="btn" data-sheet="jointrip">Bli med på en ny tur</button>
-        <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
-        <button class="btn" data-sheet="about">Om appen og personvern</button>
-        <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
-        ${trip.erEier || trip.erAdmin ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
-        <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
-      </div>`;
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Kontoen din</div>
+        <div class="card pad"><div class="list">
+          <button class="listrow" data-sheet="koblepost">
+            <div class="grow">
+              <div class="nm">${Api.erAnonym() ? "Sikre kontoen med e-post" : "Bytt e-postadresse"}</div>
+              <div class="sub">${Api.erAnonym()
+                ? "Nå bor kontoen bare i denne nettleseren"
+                : esc(Api.minEpost() || "Innlogget")}</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+          <button class="listrow" data-sheet="about">
+            <div class="grow"><div class="nm">Om appen og personvern</div></div>
+            <span class="chev">${ICON.chev}</span></button>
+        </div></div>
+        ${Api.erAnonym() ? `<p class="muted" style="margin-top:7px">Bytter du telefon eller tømmer
+          nettleserdata mens du er gjest, er turene borte.</p>` : ""}
+      </div>
+
+      <details class="fare">
+        <summary>Flere valg</summary>
+        <div class="stack">
+          <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
+          ${trip.erEier || trip.erAdmin ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
+          <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
+        </div>
+      </details>`;
   }
 
   /* ───────────────── tegning ───────────────── */
@@ -1015,7 +1053,9 @@ const UI = (() => {
 
     // Fanerada er i veien når du skriver i en samtale.
     $("tabbar").hidden = Boolean(conv);
-    const antall = oppgaver().length;
+    // Merket på Meg teller både ting reiselederen må ordne og at varsler
+    // ikke er slått på — begge deler er noe som venter på deg.
+    const antall = oppgaver().length + (varslerErAv() ? 1 : 0);
     const uleste = Api.antallUleste(S.trip.id);
     const merke = id =>
       id === "meg" && antall ? `<span class="varsel">${antall}</span>`
@@ -2154,7 +2194,8 @@ const UI = (() => {
      nedtrekksmenyer blir bare i veien. */
   async function aapneVarsler(fraHistorikk) {
     S.side = "varsler";
-    S.varselStatus = null;
+    // Statusen beholdes mens den sjekkes på nytt, så siden ikke blinker
+    // gjennom et «henter» hver gang du åpner den.
     S.varselEnheter = null;
     S.varselTest = null;
     if (!fraHistorikk) history.pushState({ side: "varsler" }, "");
