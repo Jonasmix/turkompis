@@ -5,7 +5,8 @@ const UI = (() => {
   const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false,
     nye: 0, sistAntall: 0, beholdSkroll: null,
     side: null, varselStatus: null, varselEnheter: null, varselTest: null,
-    folk: null, folkFeil: false, sisteVisning: null };
+    folk: null, folkFeil: false, sisteVisning: null,
+    sideChat: null, chatFolk: null, ventende: 0 };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -35,6 +36,13 @@ const UI = (() => {
 
   const mapsGoogle = p => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.name + ", " + p.addr) + "&travelmode=transit";
   const mapsApple  = p => "https://maps.apple.com/?daddr=" + encodeURIComponent(p.name + ", " + p.addr) + "&dirflg=r";
+
+  /* Én knapp, ikke to. Hvilket kart som åpnes velger du én gang under
+     Meg — det er ikke noe du skal ta stilling til hver gang du skal et
+     sted, midt i at bussen går. */
+  const kartLenke = p => (Api.kartValg() === "apple" ? mapsApple : mapsGoogle)(p);
+  const kartKnapp = (p, klasse) =>
+    `<a class="btn ${klasse}" href="${kartLenke(p)}" target="_blank" rel="noopener">${ICON.nav} Veibeskrivelse</a>`;
 
   const ICON = {
     pin:'<svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>',
@@ -280,6 +288,9 @@ const UI = (() => {
       Api.lastVaer(tripId);
       Api.lastVarselvalg(tripId).catch(() => {});
       Api.erHer(tripId, null);
+      if (trip.role === "leader") {
+        Api.antallVentende(tripId).then(n => { if (n !== S.ventende) { S.ventende = n; render(); } });
+      } else S.ventende = 0;
       // Statusen trengs på Meg-fanen, ikke bare inne på varselsiden.
       Api.varselStatus().then(s => { if (s !== S.varselStatus) { S.varselStatus = s; render(); } });
       S.svarTil = null;
@@ -392,7 +403,7 @@ const UI = (() => {
         <div class="w">${esc(ne.item.title)}${vaerMerke(ne.item.place, ne.day.date, ne.item.t, dagensSted(ne.day))}</div>
         <div class="p">${p ? esc(p.name) : esc(ne.item.note || "")}</div>
         ${p ? `<div class="acts">
-          <a class="btn solid" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Veibeskrivelse</a>
+          ${kartKnapp(p, "solid")}
           <button class="btn" data-sheet="place" data-place="${esc(ne.item.place)}">Detaljer</button>
         </div>` : ""}
       </div>`;
@@ -568,8 +579,7 @@ const UI = (() => {
         </div>
         <div class="why">${esc(a.why)}</div>
         <div class="acts">
-          <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
-          <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
+        ${kartKnapp(p, "primary")}
         </div>
       </div>
     </div>`;
@@ -938,8 +948,11 @@ const UI = (() => {
         <div class="eyebrow" style="margin-bottom:8px">Turen</div>
         <div class="card pad"><div class="list">
           <button class="listrow" data-sheet="deltakere">
-            <div class="grow"><div class="nm">Deltakere og roller</div>
-              <div class="sub">Hvem er med, og hvem som er reiseleder</div></div>
+            <div class="grow">
+              <div class="nm">Deltakere og roller${S.ventende ? '<span class="prikkmerke"></span>' : ""}</div>
+              <div class="sub"${S.ventende ? ' style="color:var(--amber)"' : ""}>${S.ventende
+                ? `${S.ventende} venter på å bli sluppet inn`
+                : "Hvem er med, og hvem som er reiseleder"}</div></div>
             <span class="chev">${ICON.chev}</span></button>
 
           <button class="listrow" data-sheet="varsler">
@@ -982,17 +995,18 @@ const UI = (() => {
                 ? "Nå bor kontoen bare i denne nettleseren"
                 : esc(Api.minEpost() || "Innlogget")}</div></div>
             <span class="chev">${ICON.chev}</span></button>
+          <button class="listrow" data-sheet="kartvalg">
+            <div class="grow"><div class="nm">Kart</div>
+              <div class="sub">Veibeskrivelser åpnes i ${Api.kartValg() === "apple" ? "Apple Kart" : "Google Maps"}</div></div>
+            <span class="chev">${ICON.chev}</span></button>
           <button class="listrow" data-sheet="about">
             <div class="grow"><div class="nm">Om appen og personvern</div></div>
             <span class="chev">${ICON.chev}</span></button>
         </div></div>
         ${Api.erAnonym() ? `<p class="muted" style="margin-top:7px">Bytter du telefon eller tømmer
           nettleserdata mens du er gjest, er turene borte.</p>` : ""}
-      </div>
 
-      <div>
-        <div class="eyebrow" style="margin-bottom:8px">Flere valg</div>
-        <div class="stack">
+        <div class="stack" style="margin-top:12px">
           <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
           ${trip.erEier || trip.erAdmin ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
           <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
@@ -1012,8 +1026,14 @@ const UI = (() => {
     $("apphead").hidden = Boolean(conv || side);
     $("convhead").hidden = !(conv || side);
     $("convWho").hidden = Boolean(side);
+    // Navnet i samtaletoppen er en knapp inn til chatsiden. På de andre
+    // sidene er det bare en overskrift.
+    $("convhead").classList.toggle("trykkbar", Boolean(conv));
+    $("convhead").querySelector(".t").dataset.chatside = conv ? conv.id : "";
+
     if (side) {
-      $("convName").textContent = side === "deltakere" ? "Deltakere og roller" : "Varsler";
+      const sidenavn = { deltakere: "Deltakere og roller", varsler: "Varsler", chat: "Om chatten" };
+      $("convName").textContent = sidenavn[side] || "";
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
       $("convName").textContent = conv.name;
@@ -1059,6 +1079,7 @@ const UI = (() => {
     S.sisteVisning = visning;
 
     $("screen").innerHTML = side === "varsler" ? viewVarsler()
+                          : side === "chat" ? viewChatside()
                           : side === "deltakere" ? viewDeltakere()
                           : S.tab === "program" ? viewProgram()
                           : S.tab === "chat" ? viewChat()
@@ -1307,8 +1328,7 @@ const UI = (() => {
       <div class="addr">${esc(p.addr || "Ingen adresse lagt inn")}</div>
       ${trygLenke(p.url) ? `<div class="addr"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></div>` : ""}
       ${p.addr ? `<div class="acts">
-        <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
-        <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
+        ${kartKnapp(p, "primary")}
       </div>` : ""}
       ${leder ? `<form id="adrForm" style="margin-top:16px">
         <div class="field">
@@ -1344,8 +1364,7 @@ const UI = (() => {
       ${p ? `<div class="addr">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : " · ingen adresse"}</div>` : ""}
       ${it.note ? `<div class="addr">${esc(it.note)}</div>` : ""}
       ${p && p.addr ? `<div class="acts">
-        <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
-        <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
+        ${kartKnapp(p, "primary")}
       </div>` : ""}
 
       ${leder ? `
@@ -1584,93 +1603,6 @@ const UI = (() => {
   const kanDoppe = ch =>
     Boolean(ch) && (ch.private ? true : S.trip.role === "leader");
 
-  /* Deltakere i én chat — hvem som kan lese den, og hvem du kan legge til. */
-  async function sheetChannelMembers(channelId) {
-    const ch = S.trip.channels.find(c => c.id === channelId);
-    if (!ch) return;
-
-    openSheet(`<h3>${esc(ch.name)}</h3>
-      <p class="muted" style="margin:6px 0 14px">
-        ${ch.private
-          ? "Privat chat. Bare de som står her kan lese den — reiseledere ser den ikke."
-          : "Åpen chat. Alle som er med på turen kan lese og skrive her."}</p>
-      ${kanDoppe(ch) ? `<button class="listrow" data-sheet="doppchat" data-chat="${esc(channelId)}"
-          style="border-bottom:1px solid var(--line-soft);margin-bottom:4px">
-          <div class="grow"><div class="nm">Endre navn på chatten</div>
-            <div class="sub">${esc(ch.name)}</div></div>
-          <span class="chev">${ICON.chev}</span></button>` : ""}
-
-      <div class="person" style="margin-bottom:16px">
-        <span>Varsler herfra</span>
-        <select class="select minivalg" id="chatVarsel">
-          <option value="folg" ${!Api.varselvalg().chat[channelId] ? "selected" : ""}>Følg turen</option>
-          ${NIVAER.map(([v, navn]) => `<option value="${v}"
-            ${Api.varselvalg().chat[channelId] === v ? "selected" : ""}>${navn}</option>`).join("")}
-        </select>
-      </div>
-      <div id="cmBody">${venter("Henter")}</div>
-      <button class="btn close" data-close>Lukk</button>`);
-
-    $("chatVarsel").addEventListener("change", async e => {
-      try { await Api.settVarselNiva(S.trip.id, channelId, e.target.value); toast("Lagret."); }
-      catch (err) { toast(err.message || "Klarte ikke lagre."); }
-    });
-
-    if (!ch.private) {
-      try {
-        const all = await Api.tripMembers(S.trip.id);
-        $("cmBody").innerHTML = `<div class="memberlist">${all.map(p =>
-          `<div class="person"><span>${esc(p.name)}${p.me ? " <em>deg</em>" : p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span></div>`
-        ).join("")}</div>`;
-      } catch { $("cmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`; }
-      return;
-    }
-
-    try {
-      const [all, inChannel] = await Promise.all([
-        Api.tripMembers(S.trip.id),
-        Api.channelMembers(channelId)
-      ]);
-      const inSet = new Set(inChannel);
-      const members = all.filter(p => inSet.has(p.id));
-      const others = all.filter(p => !inSet.has(p.id));
-
-      $("cmBody").innerHTML = `
-        <div class="eyebrow" style="margin-bottom:6px">Med i chatten</div>
-        <div class="memberlist">${members.map(p => `<div class="person">
-          <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}</span>
-          ${p.me ? "" : `<button class="linkbtn" data-cmdel="${esc(p.id)}">fjern</button>`}
-        </div>`).join("")}</div>
-        ${others.length ? `
-          <div class="eyebrow" style="margin:16px 0 6px">Andre på turen</div>
-          <div class="memberlist">${others.map(p => `<div class="person">
-            <span>${esc(p.name)}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
-            <button class="linkbtn" data-cmadd="${esc(p.id)}">legg til</button>
-          </div>`).join("")}</div>` : ""}
-        <button class="btn danger" style="width:100%;margin-top:16px" data-cmleave="${esc(channelId)}">Gå ut av chatten</button>`;
-
-      $("cmBody").addEventListener("click", async ev => {
-        const b = ev.target.closest("[data-cmadd],[data-cmdel],[data-cmleave]");
-        if (!b) return;
-        try {
-          if (b.dataset.cmadd) await Api.addChannelMember(channelId, b.dataset.cmadd);
-          else if (b.dataset.cmdel) await Api.removeChannelMember(channelId, b.dataset.cmdel);
-          else {
-            if (!confirm("Gå ut av chatten? Du mister tilgangen til meldingene.")) return;
-            const me = all.find(p => p.me);
-            await Api.removeChannelMember(channelId, me.id);
-            closeSheet();
-            S.openChat = null;
-            await openTrip(S.trip.id);
-            S.tab = "chat"; return render();
-          }
-          sheetChannelMembers(channelId);
-        } catch (e2) { toast(e2.message || "Det gikk ikke."); }
-      });
-    } catch {
-      $("cmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
-    }
-  }
 
   function sheetAddDay() {
     const last = S.trip.days[S.trip.days.length - 1];
@@ -2174,7 +2106,9 @@ const UI = (() => {
         <div class="field">
           <label for="aKode">Kode</label>
           <input id="aKode" inputmode="numeric" autocomplete="one-time-code" maxlength="8"
-                 class="kodefelt" placeholder="000000">
+                 class="kodefelt" placeholder="00000000" enterkeyhint="go">
+          <small style="display:block;margin-top:6px;font-size:12.5px;color:var(--ink-3)">
+            Du kan lime inn koden rett fra e-posten.</small>
         </div>
         <p class="err" id="kFeil" hidden></p>
         <button class="btn primary big" type="submit" id="kSend">Logg inn</button>
@@ -2182,11 +2116,23 @@ const UI = (() => {
 
     setTimeout(() => $("aKode") && $("aKode").focus(), 100);
 
+    // Åtte sifre med luft mellom seg blir bredere enn skjermen på en
+    // liten telefon. Feltet krymper skriften heller enn å klippe koden.
+    const kodefelt = $("aKode");
+    kodefelt.addEventListener("input", () => {
+      const rent = kodefelt.value.replace(/\D/g, "").slice(0, 8);
+      if (rent !== kodefelt.value) kodefelt.value = rent;
+      kodefelt.style.fontSize = rent.length > 6 ? "21px" : "";
+      kodefelt.style.letterSpacing = rent.length > 6 ? ".22em" : "";
+    });
+
     $("kodeForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const kode = $("aKode").value.trim();
+      // Limer du inn fra e-posten, følger det ofte med mellomrom eller
+      // et linjeskift. Vi plukker ut sifrene og lar resten ligge.
+      const kode = $("aKode").value.replace(/\D/g, "");
       const feil = $("kFeil"), knapp = $("kSend");
-      if (kode.length < 6) { feil.textContent = "Koden er seks siffer."; feil.hidden = false; return; }
+      if (kode.length < 6) { feil.textContent = "Skriv hele koden fra e-posten."; feil.hidden = false; return; }
       feil.hidden = true;
       knapp.disabled = true; knapp.innerHTML = prikker() + " Sjekker";
       try {
@@ -2294,6 +2240,89 @@ const UI = (() => {
     return true;
   }
 
+  /* Alt om én chat på ett sted: hvem som er med, hva den heter, og hva
+     du vil varsles om herfra. Du kommer hit ved å trykke på navnet
+     øverst i samtalen — der man leter etter det. */
+  async function aapneChatside(channelId, fraHistorikk) {
+    S.side = "chat";
+    S.sideChat = channelId;
+    S.chatFolk = null;
+    if (!fraHistorikk) history.pushState({ side: "chat", chat: channelId }, "");
+    render();
+
+    try {
+      const [alle, iChatten] = await Promise.all([
+        Api.tripMembers(S.trip.id),
+        Api.channelMembers(channelId).catch(() => null)
+      ]);
+      const ch = S.trip.channels.find(c => c.id === channelId);
+      S.chatFolk = ch && ch.private && iChatten
+        ? { med: alle.filter(p => iChatten.includes(p.id)), andre: alle.filter(p => !iChatten.includes(p.id)) }
+        : { med: alle.filter(p => !p.venter), andre: [] };
+    } catch { S.chatFolk = { med: [], andre: [], feil: true }; }
+    if (S.side === "chat") render();
+  }
+
+  function viewChatside() {
+    const ch = S.trip.channels.find(c => c.id === S.sideChat);
+    if (!ch) return `<p class="muted">Fant ikke chatten.</p>`;
+    const folk = S.chatFolk;
+    const valg = Api.varselvalg();
+
+    return `
+      <div class="megkort">
+        <span class="megava" style="background:${ch.private ? "var(--amber)" : "var(--blue)"}">
+          ${ch.private ? "&#128274;" : ICON.chat}</span>
+        <span class="grow">
+          <b>${esc(ch.name)}</b>
+          <small>${ch.private
+            ? "Privat chat — bare de som står under, ser den"
+            : "Åpen chat — alle på turen kan lese og skrive"}</small>
+        </span>
+      </div>
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Om chatten</div>
+        <div class="card pad"><div class="list">
+          ${kanDoppe(ch) ? `<button class="listrow" data-sheet="doppchat" data-chat="${esc(ch.id)}">
+            <div class="grow"><div class="nm">Endre navn</div><div class="sub">${esc(ch.name)}</div></div>
+            <span class="chev">${ICON.chev}</span></button>` : ""}
+          <div class="listrow" style="cursor:default">
+            <div class="grow"><div class="nm">Varsler herfra</div>
+              <div class="sub">Egne varsler for denne chatten</div></div>
+            <select class="select minivalg" data-chatniva="${esc(ch.id)}">
+              <option value="folg" ${!valg.chat[ch.id] ? "selected" : ""}>Standard</option>
+              ${NIVAER.map(([v, tittel]) => `<option value="${v}"
+                ${valg.chat[ch.id] === v ? "selected" : ""}>${tittel}</option>`).join("")}
+            </select>
+          </div>
+        </div></div>
+      </div>
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">
+          ${ch.private ? "Med i chatten" : "Med på turen"}${folk ? " · " + folk.med.length : ""}</div>
+        ${!folk ? venter("Henter deltakere") : folk.feil
+          ? `<p class="muted">Klarte ikke hente deltakerlista.</p>`
+          : `<div class="memberlist">${folk.med.map(p => `<div class="person">
+              <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
+              ${ch.private && !p.me ? `<button class="linkbtn" data-cmdel="${esc(p.id)}">fjern</button>` : ""}
+            </div>`).join("")}</div>`}
+      </div>
+
+      ${folk && folk.andre.length ? `<div>
+        <div class="eyebrow" style="margin-bottom:8px">Andre på turen</div>
+        <div class="memberlist">${folk.andre.map(p => `<div class="person">
+          <span>${esc(p.name)}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
+          <button class="linkbtn" data-cmadd="${esc(p.id)}">legg til</button>
+        </div>`).join("")}</div>
+      </div>` : ""}
+
+      ${ch.private ? `<div class="stack">
+        <button class="btn danger" data-cmleave="${esc(ch.id)}">Gå ut av chatten</button>
+      </div>` : ""}`;
+  }
+
   function viewVarsler() {
     const st = S.varselStatus;
     const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -2379,7 +2408,7 @@ const UI = (() => {
                 </span>
               </span>
               <select class="select minivalg" data-chatniva="${esc(c.id)}">
-                <option value="folg" ${!valg.chat[c.id] ? "selected" : ""}>Følg turen</option>
+                <option value="folg" ${!valg.chat[c.id] ? "selected" : ""}>Standard</option>
                 ${NIVAER.map(([v, tittel]) => `<option value="${v}"
                   ${valg.chat[c.id] === v ? "selected" : ""}>${tittel}</option>`).join("")}
               </select>
@@ -2480,6 +2509,11 @@ const UI = (() => {
           <input id="tuNavn" value="${esc(t.name)}" maxlength="80"></div>
         <div class="field"><label for="tuOrg">Klasse eller gruppe</label>
           <input id="tuOrg" value="${esc(t.org || "")}" maxlength="80" placeholder="2STB Tryggheim"></div>
+        ${t.days.length ? `<div class="field"><label for="tuDato">Første dag</label>
+          <input id="tuDato" type="date" value="${esc(t.days[0].date)}">
+          <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
+            Flyttes turen, forskyves hele programmet like mange dager. Punktene følger dagen sin.</small>
+        </div>` : ""}
         <p class="err" id="tuFeil" hidden></p>
         <button class="btn primary big" type="submit" id="tuLagre">Lagre</button>
       </form>
@@ -2493,6 +2527,10 @@ const UI = (() => {
       knapp.disabled = true; knapp.innerHTML = prikker() + " Lagrer";
       try {
         await Api.updateTrip(t.id, { name: navn, org: $("tuOrg").value.trim() });
+        const nyDato = $("tuDato") && $("tuDato").value;
+        if (nyDato && t.days.length && nyDato !== t.days[0].date) {
+          await Api.flyttTur(t.id, nyDato);
+        }
         closeSheet();
         await openTrip(t.id);
         S.trips = await Api.myTrips().catch(() => S.trips);
@@ -2542,6 +2580,22 @@ const UI = (() => {
     });
   }
 
+  /* Hvilket kart som åpnes. Et valg per enhet: du har ikke nødvendigvis
+     samme kart på PC-en som på telefonen. */
+  function sheetKartvalg() {
+    const naa = Api.kartValg();
+    openSheet(`<h3>Kart</h3>
+      <p class="muted" style="margin:6px 0 14px">Veibeskrivelser åpnes i appen du velger her.
+        Valget gjelder denne enheten.</p>
+      <div class="picks">
+        <label class="pick"><input type="radio" name="kartvalg" value="google" ${naa === "google" ? "checked" : ""}>
+          <span><b>Google Maps</b><br><small>Virker på både iPhone og Android</small></span></label>
+        <label class="pick"><input type="radio" name="kartvalg" value="apple" ${naa === "apple" ? "checked" : ""}>
+          <span><b>Apple Kart</b><br><small>Bare på iPhone, iPad og Mac</small></span></label>
+      </div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
   function sheetVarselInfo() {
     openSheet(`<h3>Hva betyr valgene?</h3>
       <p class="muted" style="margin:6px 0 16px">Varsler kommer bare når du ikke har appen
@@ -2566,7 +2620,7 @@ const UI = (() => {
               dem selv.</small></span>
         </div>
         <div class="person" style="align-items:flex-start">
-          <span class="chattekst"><b>Følg turen</b>
+          <span class="chattekst"><b>Standard</b>
             <small>Bare på enkeltchatter: chatten gjør det samme som standardvalget øverst.
               Endrer du standarden, følger den med.</small></span>
         </div>
@@ -2598,7 +2652,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2691,9 +2745,28 @@ const UI = (() => {
     }
 
     // ark
-    if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
+    if (t.dataset.members) return aapneChatside(t.dataset.members);
+    if (t.dataset.chatside) return aapneChatside(t.dataset.chatside);
     if (t.dataset.skjul) return skjulOppgave(t.dataset.skjul, t.dataset.skjulid, true);
     if (t.dataset.vis) { closeSheet(); return skjulOppgave(t.dataset.vis, t.dataset.visid, false); }
+    // Chatsiden: legg til, fjern, eller gå ut selv.
+    if (t.dataset.cmadd || t.dataset.cmdel || t.dataset.cmleave) {
+      const kanal = S.sideChat;
+      try {
+        if (t.dataset.cmadd) await Api.addChannelMember(kanal, t.dataset.cmadd);
+        else if (t.dataset.cmdel) await Api.removeChannelMember(kanal, t.dataset.cmdel);
+        else {
+          if (!confirm("Gå ut av chatten? Du mister tilgangen til meldingene.")) return;
+          await Api.removeChannelMember(kanal, null);
+          S.side = null; S.openChat = null;
+          await openTrip(S.trip.id);
+          S.tab = "chat";
+          return render();
+        }
+        return aapneChatside(kanal, true);
+      } catch (e) { return toast(e.message || "Det gikk ikke."); }
+    }
+
     // Deltakersiden: roller, godkjenning og fjerning.
     if (t.dataset.rolle || t.dataset.godkjenn || t.dataset.avvis || t.dataset.fjern) {
       // Å fjerne noen er ikke til å angre på, så vi spør først. Meldingene
@@ -2734,6 +2807,7 @@ const UI = (() => {
     if (t.dataset.sheet === "deltakere") { closeSheet(); return aapneDeltakere(); }
     if (t.dataset.sheet === "varsler") { closeSheet(); return aapneVarsler(); }
     if (t.dataset.sheet === "varselinfo") return sheetVarselInfo();
+    if (t.dataset.sheet === "kartvalg") return sheetKartvalg();
     if (t.dataset.sheet === "endretur") return sheetEndreTur();
     if (t.dataset.sheet === "doppchat") return sheetDoppChat(t.dataset.chat);
     if (t.dataset.sheet === "logginn") return visAuth("logginn");
@@ -2751,6 +2825,13 @@ const UI = (() => {
   document.addEventListener("change", async e => {
     const m = e.target;
     if (!S.trip) return;
+
+    if (m.name === "kartvalg") {
+      Api.settKartValg(m.value);
+      closeSheet();
+      render();
+      return toast("Veibeskrivelser åpnes nå i " + (m.value === "apple" ? "Apple Kart." : "Google Maps."));
+    }
 
     if (m.id === "krevGodkjenning") {
       try {

@@ -549,11 +549,21 @@ label.person span{flex:1;min-width:0}
    ord i en liste — ellers er det ikke opplagt hva «Hele turen» er. */
 .chatnavn{display:flex;align-items:center;gap:10px;min-width:0}
 .chatikon{
-  width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;
-  background:var(--blue-soft);color:var(--blue-ink);font-size:14px;
+  width:32px;height:32px;border-radius:50%;flex:none;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--blue-soft);color:var(--blue-ink);
+  font-size:15px;line-height:1;
 }
-.chatikon svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;
+/* Hengelåsen er en emoji og tegnes litt høyt; ikonet er en strektegning
+   som må ha samme optiske størrelse. Uten dette spriker de. */
+.chatikon svg{width:17px;height:17px;display:block;stroke:currentColor;fill:none;
+  stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.megava svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;
   stroke-linecap:round;stroke-linejoin:round}
+
+/* Navnet øverst i en samtale er en knapp inn til chatsiden. */
+.convhead.trykkbar .t{cursor:pointer}
+.convhead.trykkbar .t b::after{content:" ›";color:var(--ink-3);font-weight:500}
 /* Navnet over, hva slags chat det er under. Uten denne står de på samme
    linje, fordi .person gjør alle spennene sine om til flex-rader. */
 .person .chattekst{display:block;min-width:0}

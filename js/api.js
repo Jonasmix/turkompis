@@ -24,7 +24,8 @@ const Api = (() => {
     lastChannel: id => `tk.lastChannel.${id}`,
     snapshot: id => `tk.snapshot.${id}`,
     vaer: id => `tk.vaer.${id}`,
-    lest: id => `tk.lest.${id}`
+    lest: id => `tk.lest.${id}`,
+    kart: "tk.kart"
   };
 
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } }
@@ -786,6 +787,34 @@ const Api = (() => {
     if (cache.trip && cache.trip.id === tripId) Object.assign(cache.trip, rad);
   }
 
+  /* Flytt hele turen til en ny startdato. Dagene beholder avstanden seg
+     imellom, og punktene følger dagen sin. */
+  async function flyttTur(tripId, nyStart) {
+    const { error } = await sb.rpc("flytt_tur", { p_trip: tripId, p_ny_start: nyStart });
+    if (error) throw friendly(error);
+  }
+
+  /* Hvor mange venter på å bli sluppet inn? Et tall, ikke en liste —
+     det er alt Meg-fanen trenger for å sette en prikk. */
+  async function antallVentende(tripId) {
+    const { data, error } = await sb.from("members")
+      .select("user_id").eq("trip_id", tripId).eq("status", "pending");
+    if (error) return 0;
+    return (data || []).length;
+  }
+
+  /* Hvilken kartapp du vil bruke. Et valg som hører til enheten, ikke
+     kontoen: du har ikke nødvendigvis samme kart på PC-en og telefonen. */
+  const ANDROID = /android/i.test(navigator.userAgent);
+  const APPLE = /iphone|ipad|ipod|macintosh/i.test(navigator.userAgent);
+
+  function kartValg() {
+    const v = lsGet(LS.kart, null);
+    if (v === "google" || v === "apple") return v;
+    return APPLE && !ANDROID ? "apple" : "google";   // det telefonen har fra før
+  }
+  const settKartValg = v => lsSet(LS.kart, v);
+
   /* Hvem som får døpe om en chat, avgjøres i basen: en åpen chat hører
      til reiselederen eller den som laget den, en privat til dem som er
      med i den. */
@@ -844,9 +873,10 @@ const Api = (() => {
     if (error) throw friendly(error);
   }
 
+  /* Uten personId går du ut selv. */
   async function removeChannelMember(channelId, personId) {
     const { error } = await sb.from("channel_members").delete()
-      .eq("channel_id", channelId).eq("user_id", personId);
+      .eq("channel_id", channelId).eq("user_id", personId || userId);
     if (error) throw error;
   }
 
@@ -1251,7 +1281,8 @@ const Api = (() => {
   return {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
-    myTrips, joinByCode, createTrip, updateTrip, doppChat, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
+    myTrips, joinByCode, createTrip, updateTrip, doppChat, flyttTur, antallVentende,
+    kartValg, settKartValg, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
     settLest, erUlest, antallUleste,
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
