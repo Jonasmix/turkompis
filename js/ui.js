@@ -850,8 +850,9 @@ const UI = (() => {
     return `<div class="card pad" style="padding-block:15px;border-left:3px solid var(--blue)">
       <b style="font-family:Archivo,sans-serif;font-size:14.5px">Legg TourFlow på hjemskjermen</b>
       <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
-        Da åpnes den som en app, husker deg${iOS ? ", og varsler begynner å virke — på iPhone
-        finnes de bare for apper på hjemskjermen" : " og kan gi deg varsler"}.</p>
+        Da åpnes den som en app, husker deg${iOS
+          ? ", og varsler begynner å virke — på iPhone finnes de bare for apper på hjemskjermen"
+          : " og kan gi deg varsler"}.</p>
       ${hvordan}
       <button class="linkbtn" style="margin-top:10px;font-size:13px" id="skjulInstall">Ikke nå</button>
     </div>`;
