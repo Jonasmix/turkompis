@@ -12,7 +12,10 @@ const Api = (() => {
   let userId = null;
   let liveSub = null;            // abonnement på nye meldinger
   let liveTrip = null;           // hvilken tur abonnementet gjelder
-  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {} };
+  let reaSub = null;             // abonnement på reaksjoner i én chat
+  let reaKanal = null;
+  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {}, mer: {} };
+  const SIDE = 300;              // meldinger per bunke
   const listeners = new Set();
 
   const LS = {
@@ -139,20 +142,24 @@ const Api = (() => {
 
   function friendly(error) {
     const m = String(error.message || "");
-    if (m.includes("ukjent_kode")) return new Error("Fant ingen tur med den koden.");
-    if (m.includes("mangler_navn")) return new Error("Navn mangler.");
-    if (m.includes("for_mange_turer")) return new Error("Du har laget for mange turer.");
-    if (m.includes("ikke_medlem")) return new Error("Du er ikke med på denne turen.");
-    if (m.includes("ingen_tilgang")) return new Error("Du har ikke tilgang til denne chatten.");
-    if (m.includes("ikke_paa_turen")) return new Error("Personen er ikke med på turen.");
-    if (m.includes("ukjent_chat")) return new Error("Fant ikke chatten.");
-    if (m.includes("ikke_leder")) return new Error("Bare reiseledere kan endre roller.");
-    if (m.includes("eier_beholder_rollen")) return new Error("Den som laget turen beholder lederrollen.");
-    if (m.includes("siste_leder")) return new Error("Turen må ha minst én reiseleder.");
-    if (m.includes("ikke_deg_selv")) return new Error("Bruk «Meld deg av» for å gå ut selv.");
-    if (m.includes("eier_kan_ikke_fjernes")) return new Error("Den som laget turen kan ikke fjernes.");
-    if (m.includes("kan_ikke_endres")) return new Error("Denne deltakeren kan ikke endres herfra.");
-    if (m.includes("ikke_innlogget")) return new Error("Appen fikk ikke kontakt med serveren. Prøv igjen.");
+    // «kjent» betyr at teksten er skrevet for å leses av folk, ikke av oss.
+    const k = t => Object.assign(new Error(t), { kjent: true });
+    if (m.includes("ukjent_kode")) return k("Fant ingen tur med den koden.");
+    if (m.includes("mangler_navn")) return k("Navn mangler.");
+    if (m.includes("for_mange_turer")) return k("Du har laget for mange turer.");
+    if (m.includes("ikke_medlem")) return k("Du er ikke med på denne turen.");
+    if (m.includes("ingen_tilgang")) return k("Du har ikke tilgang til denne chatten.");
+    if (m.includes("ikke_paa_turen")) return k("Personen er ikke med på turen.");
+    if (m.includes("ukjent_chat")) return k("Fant ikke chatten.");
+    if (m.includes("ikke_leder")) return k("Bare reiseledere kan endre roller.");
+    if (m.includes("eier_beholder_rollen")) return k("Den som laget turen beholder lederrollen.");
+    if (m.includes("siste_leder")) return k("Turen må ha minst én reiseleder.");
+    if (m.includes("ikke_deg_selv")) return k("Bruk «Meld deg av» for å gå ut selv.");
+    if (m.includes("eier_kan_ikke_fjernes")) return k("Den som laget turen kan ikke fjernes.");
+    if (m.includes("kan_ikke_endres")) return k("Denne deltakeren kan ikke endres herfra.");
+    if (m.includes("for_mange_meldinger")) return k("Du skriver fort. Vent et lite øyeblikk.");
+    if (m.includes("for_mange_chatter")) return k("Du har laget mange chatter på denne turen. Rydd i dem først.");
+    if (m.includes("ikke_innlogget")) return k("Appen fikk ikke kontakt med serveren. Prøv igjen.");
     return new Error(m || "Noe gikk galt.");
   }
 
@@ -221,6 +228,7 @@ const Api = (() => {
       // staar ingen steder i grensesnittet.
       role: member && (member.role === "leader" || member.role === "admin") ? "leader" : "member",
       erAdmin: !!(member && member.role === "admin"),
+      erEier: trip.created_by === userId,
       places: placeMap,
       days: days.map(d => Object.assign({
         id: d.id, date: d.date, hotel: d.hotel_place_id, ignorerHotell: d.ignore_hotel === true,
@@ -247,9 +255,20 @@ const Api = (() => {
 
   async function loadRecent(tripId) {
     if (!online()) return lastByChannel();
-    const { data, error } = await sb
-      .from("messages").select("channel_id, txt, author_name, created_at, author_id")
-      .eq("trip_id", tripId).order("created_at", { ascending: false }).limit(300);
+
+    // Én rad per chat, rett fra basen. Den gamle måten — hent de 300
+    // siste meldingene i turen og plukk ut den nyeste per chat — mistet
+    // alle de rolige chattene så snart hovedchatten ble travel.
+    const rpc = await sb.rpc("siste_meldinger", { p_trip: tripId });
+    let data = rpc.data, error = rpc.error;
+
+    if (error) {
+      // Funksjonen er ikke lagt inn i basen enda: gjør det på gamlemåten.
+      const gml = await sb
+        .from("messages").select("channel_id, txt, author_name, created_at, author_id")
+        .eq("trip_id", tripId).order("created_at", { ascending: false }).limit(300);
+      data = gml.data; error = gml.error;
+    }
     if (error) throw error;
     const map = {};
     for (const m of (data || [])) {
@@ -268,13 +287,34 @@ const Api = (() => {
     // stoppet å vise nye meldinger etter at den passerte grensa.
     const [m, r] = await Promise.all([
       sb.from("messages").select("*").eq("channel_id", channelId)
-        .order("created_at", { ascending: false }).limit(300),
+        .order("created_at", { ascending: false }).limit(SIDE),
       sb.from("reactions").select("*").eq("channel_id", channelId)
     ]);
     if (m.error) throw m.error;
     cache.messages[channelId] = (m.data || []).reverse().map(shape);
     cache.reactions[channelId] = r.error ? [] : (r.data || []);
+    // Kom det en full bunke, ligger det sannsynligvis mer bakenfor.
+    cache.mer[channelId] = (m.data || []).length >= SIDE;
     return cache.messages[channelId];
+  }
+
+  const harEldre = channelId => Boolean(cache.mer[channelId]);
+
+  /* Hent bunken før den eldste vi har. Chatten holder bare de nyeste 300
+     i minnet; skal du lenger bak i turen, hentes de på forespørsel. */
+  async function loadMoreMessages(channelId) {
+    const liste = cache.messages[channelId] || [];
+    if (!online() || !liste.length) return false;
+
+    const { data, error } = await sb.from("messages").select("*")
+      .eq("channel_id", channelId).lt("created_at", liste[0].ts)
+      .order("created_at", { ascending: false }).limit(SIDE);
+    if (error) throw error;
+
+    const eldre = (data || []).reverse().map(shape);
+    cache.messages[channelId] = eldre.concat(liste);
+    cache.mer[channelId] = eldre.length >= SIDE;
+    return eldre.length;
   }
 
   const shape = m => ({
@@ -341,7 +381,7 @@ const Api = (() => {
     if (liveSub && liveTrip === tripId) return;
     if (liveSub) { sb.removeChannel(liveSub); liveSub = null; }
     liveTrip = tripId;
-    liveSub = sb.channel("trip-" + tripId)
+    liveSub = sb.channel("tur-" + tripId)
       .on("postgres_changes",
           { event: "INSERT", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
           payload => {
@@ -371,10 +411,60 @@ const Api = (() => {
             }
             if (endret) fire();
           })
+      // Programmet kan endres mens folk har appen åpen. Da skal skjermen
+      // følge med, ikke vise gårsdagens klokkeslett til noen lukker appen.
       .on("postgres_changes",
-          { event: "*", schema: "public", table: "reactions" },
+          { event: "*", schema: "public", table: "items", filter: `trip_id=eq.${tripId}` },
+          programEndret)
+      .on("postgres_changes",
+          { event: "*", schema: "public", table: "days", filter: `trip_id=eq.${tripId}` },
+          programEndret)
+      .on("postgres_changes",
+          { event: "*", schema: "public", table: "places", filter: `trip_id=eq.${tripId}` },
+          programEndret)
+      .subscribe();
+  }
+
+  /* Én endring i programmet kommer sjelden alene — drar du om på fem
+     punkter, kommer det fem hendelser. Vi venter til det har roet seg,
+     og henter turen én gang. */
+  let programTimer = null;
+  function programEndret() {
+    clearTimeout(programTimer);
+    programTimer = setTimeout(async () => {
+      if (!liveTrip) return;
+      try { await loadTrip(liveTrip); fire(); } catch { /* prøver igjen neste gang */ }
+    }, 600);
+  }
+
+  /* Reaksjoner abonneres det på bare mens du har en samtale framme, og
+     bare for den samtalen. Ellers ville hver eneste emoji i hele turen
+     blitt sendt ut til alle hundre — og gratisnivået i Supabase tåler
+     hundre meldinger i sekundet til sammen. */
+  function subscribeChannel(channelId) {
+    if (reaSub && reaKanal === channelId) return;
+    unsubscribeChannel();
+    reaKanal = channelId;
+    reaSub = sb.channel("chat-" + channelId)
+      .on("postgres_changes",
+          { event: "*", schema: "public", table: "reactions", filter: `channel_id=eq.${channelId}` },
           nyttOmReaksjon)
       .subscribe();
+  }
+
+  function unsubscribeChannel() {
+    if (reaSub) sb.removeChannel(reaSub);
+    reaSub = null; reaKanal = null;
+  }
+
+  /* Ligger appen i lomma, trenger den ingen strøm av meldinger. En
+     frakoblet telefon teller heller ikke som mottaker, så både
+     tilkoblingene og meldingstallet går ned for hele turen. */
+  function kobleFra() {
+    clearTimeout(programTimer);
+    unsubscribeChannel();
+    if (liveSub) sb.removeChannel(liveSub);
+    liveSub = null; liveTrip = null;
   }
 
   /* Reaksjoner endres i mellomlageret direkte, ikke ved å hente hele
@@ -416,7 +506,7 @@ const Api = (() => {
       const { reply_to, ...utenSvar } = row;
       svar = await sb.from("messages").insert(utenSvar).select().single();
     }
-    if (svar.error) throw svar.error;
+    if (svar.error) throw friendly(svar.error);
     const data = svar.data;
     const list = cache.messages[channelId] || (cache.messages[channelId] = []);
     if (!list.some(m => m.id === data.id)) { list.push(shape(data)); }
@@ -742,8 +832,7 @@ const Api = (() => {
       userId = u.id;
       cache.messages = {}; cache.reactions = {}; cache.recent = {}; cache.vaer = {}; cache.trip = null;
       // Abonnementet hører til den forrige brukeren og må settes opp på nytt.
-      if (liveSub) { sb.removeChannel(liveSub); liveSub = null; }
-      liveTrip = null;
+      kobleFra();
     }
     cache.epost = u && u.email ? u.email : null;
     cache.anonym = !!(u && u.is_anonymous);
@@ -798,7 +887,7 @@ const Api = (() => {
     if (m.includes("disabled") || m.includes("not allowed") || m.includes("not enabled")) {
       return new Error("E-postinnlogging er slått av i Supabase.");
     }
-    if (m.includes("expired")) return new Error("Koden er utløpt. Be om en ny.");
+    if (m.includes("expired")) return k("Koden er utløpt. Be om en ny.");
     if (m.includes("token") || m.includes("otp")) {
       return new Error("Koden stemte ikke. Sjekk at du skrev alle sifrene.");
     }
@@ -832,7 +921,9 @@ const Api = (() => {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
-    messages, loadMessages, loadRecent, lastByChannel, subscribeTrip, sendMessage, deleteMessage, onChange,
+    messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
+    subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
+    sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,

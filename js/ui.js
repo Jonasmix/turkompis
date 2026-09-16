@@ -2,7 +2,8 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false };
+  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false,
+    nye: 0, sistAntall: 0, beholdSkroll: null };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -79,7 +80,15 @@ const UI = (() => {
     // Tegn paa nytt naar noe kommer inn utenfra - nye meldinger, reaksjoner
     // eller vaer. Tidligere gjaldt dette bare chatten, saa vaeret dukket
     // aldri opp i programmet for man byttet fane.
-    Api.onChange(() => { if (S.trip) render(); });
+    // Kommer det noe utenfra — meldinger, reaksjoner, vær, eller et
+    // program en reiseleder nettopp endret — tegner vi på nytt. Turen
+    // hentes fra Api, for endrer programmet seg er den vi holder utdatert.
+    Api.onChange(() => {
+      if (!S.trip) return;
+      const fersk = Api.currentTrip();
+      if (fersk && fersk.id === S.trip.id) S.trip = fersk;
+      render();
+    });
 
     const profile = Api.getProfile(), last = Api.getLastTrip();
     if (profile && last) {
@@ -177,6 +186,8 @@ const UI = (() => {
 
     // Bytter du tur, lukkes samtalen du hadde åpen.
     S.openChat = null;
+    S.nye = 0; S.sistAntall = 0;
+    Api.unsubscribeChannel();
 
     $("bootScreen").hidden = true;
     $("joinScreen").hidden = true;
@@ -549,7 +560,12 @@ const UI = (() => {
       </div>`;
     }).join("");
 
-    return `<div class="msgs" id="msgs">${body}</div>`;
+    // Chatten holder de 300 nyeste. Ligger det mer bak, hentes det når
+    // du ber om det — ikke hver gang samtalen åpnes.
+    const eldre = Api.harEldre(S.openChat)
+      ? `<button class="eldreknapp" data-eldre="1">Hent eldre meldinger</button>` : "";
+
+    return `<div class="msgs" id="msgs">${eldre}${body}</div>`;
   }
 
   /* Sveip en melding mot høyre for å svare, hold inne for å reagere.
@@ -603,6 +619,19 @@ const UI = (() => {
     }
     boks.addEventListener("pointerup", slipp);
     boks.addEventListener("pointercancel", slipp);
+  }
+
+  /* Eldre meldinger legges foran i lista. Da vokser innholdet oppover, og
+     skjermen ville hoppet — vi legger til nøyaktig den høyden som kom. */
+  async function hentEldre() {
+    const sc = $("screen");
+    const hoyde = sc.scrollHeight, topp = sc.scrollTop;
+    try {
+      const n = await Api.loadMoreMessages(S.openChat);
+      if (!n) return toast("Ikke flere meldinger.");
+    } catch { return toast("Klarte ikke hente eldre meldinger."); }
+    S.beholdSkroll = { hoyde, topp };
+    render();
   }
 
   function startSvar(id) {
@@ -795,7 +824,7 @@ const UI = (() => {
         <button class="btn" data-sheet="newtrip">Lag en ny tur</button>
         <button class="btn" data-sheet="about">Om appen og personvern</button>
         <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
-        ${trip.role === "leader" ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
+        ${trip.erEier || trip.erAdmin ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
         <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
       </div>`;
   }
@@ -833,6 +862,16 @@ const UI = (() => {
       (sk.scrollHeight - sk.scrollTop - sk.clientHeight) < 140;
     S.sisteChat = conv ? conv.id : null;
 
+    // Leser du lenger opp, teller vi hva som har kommet i mellomtiden i
+    // stedet for å dra deg ned. Eldre meldinger du selv har hentet, er
+    // ikke nye — de legger seg foran, ikke bak.
+    if (conv) {
+      const antall = Api.messages(conv.id).length;
+      if (naerBunn) S.nye = 0;
+      else if (!S.beholdSkroll && antall > S.sistAntall) S.nye += antall - S.sistAntall;
+      S.sistAntall = antall;
+    }
+
     $("screen").innerHTML = S.tab === "program" ? viewProgram()
                           : S.tab === "chat" ? viewChat()
                           : viewMe();
@@ -840,6 +879,7 @@ const UI = (() => {
     const slot = $("composerSlot");
     if (conv && !S.offline) {
       slot.innerHTML = `
+        ${S.nye ? `<button class="nyepill" data-nye="1">${S.nye} ny${S.nye === 1 ? " melding" : "e meldinger"} ↓</button>` : ""}
         ${S.svarTil ? `<div class="svarforhaand">
           <div class="svarinfo">
             <b>Svarer ${esc(S.svarTil.who)}</b>
@@ -855,9 +895,13 @@ const UI = (() => {
       const avbryt = $("avbrytSvar");
       if (avbryt) avbryt.addEventListener("click", () => { S.svarTil = null; render(); });
       settOppMeldingsgester();
-      if (naerBunn) { const sc = $("screen"); sc.scrollTop = sc.scrollHeight; }
+      const sc = $("screen");
+      if (S.beholdSkroll) {
+        sc.scrollTop = S.beholdSkroll.topp + (sc.scrollHeight - S.beholdSkroll.hoyde);
+      } else if (naerBunn) sc.scrollTop = sc.scrollHeight;
     } else slot.innerHTML = "";
     S.tilBunn = false;
+    S.beholdSkroll = null;
 
     settOppDraing();
     startKarttimere();
@@ -892,9 +936,12 @@ const UI = (() => {
   async function openChat(channelId, fromHistory) {
     S.openChat = channelId;
     S.loadingChat = true;
+    S.nye = 0; S.sistAntall = 0;
     Api.setLastChannel(S.trip.id, channelId);
     render();
     if (!fromHistory) history.pushState({ chat: channelId }, "");
+    // Reaksjoner strømmes bare for samtalen du faktisk ser på.
+    if (!S.offline) Api.subscribeChannel(channelId);
     try { await Api.loadMessages(S.trip.id, channelId); }
     catch { toast("Klarte ikke hente meldingene."); }
     S.loadingChat = false;
@@ -904,12 +951,41 @@ const UI = (() => {
   function closeChat(fromHistory) {
     if (!S.openChat) return false;
     S.openChat = null;
+    S.nye = 0;
+    Api.unsubscribeChannel();
     render();
     if (!fromHistory && history.state && history.state.chat) history.back();
     return true;
   }
 
   window.addEventListener("popstate", () => { if (S.openChat) closeChat(true); });
+
+  /* Ligger appen i bakgrunnen, kobler vi fra strømmen av meldinger.
+     En telefon i lomma trenger den ikke, og hver pålogget teller: én
+     melding til hundre påloggede er hundre meldinger gjennom Supabase.
+     Vi venter et halvt minutt, så et raskt bytte til kartet ikke koster
+     en ny tilkobling — og henter igjen det vi gikk glipp av når appen
+     kommer fram. */
+  let bakgrunnstimer = null;
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState === "hidden") {
+      clearTimeout(bakgrunnstimer);
+      bakgrunnstimer = setTimeout(() => Api.kobleFra(), 30000);
+      return;
+    }
+    clearTimeout(bakgrunnstimer); bakgrunnstimer = null;
+    if (!S.trip || S.offline) return;
+
+    Api.subscribeTrip(S.trip.id);
+    if (S.openChat) {
+      Api.subscribeChannel(S.openChat);
+      await Api.loadMessages(S.trip.id, S.openChat).catch(() => {});
+    }
+    await Api.loadRecent(S.trip.id).catch(() => {});
+    try { S.trip = (await Api.loadTrip(S.trip.id)) || S.trip; } catch {}
+    Api.lastVaer(S.trip.id);
+    render();
+  });
 
 
   /* ───────────────── send melding ───────────────── */
@@ -927,7 +1003,7 @@ const UI = (() => {
       render();
     } catch (err) {
       inp.value = txt;
-      toast("Meldingen ble ikke sendt. Sjekk nettet.");
+      toast(err && err.kjent ? err.message : "Meldingen ble ikke sendt. Sjekk nettet.");
     }
   }
 
@@ -1952,7 +2028,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2028,6 +2104,8 @@ const UI = (() => {
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
     if (t.dataset.skjul) return skjulOppgave(t.dataset.skjul, t.dataset.skjulid, true);
     if (t.dataset.vis) { closeSheet(); return skjulOppgave(t.dataset.vis, t.dataset.visid, false); }
+    if (t.dataset.nye) { S.nye = 0; S.tilBunn = true; return render(); }
+    if (t.dataset.eldre) return hentEldre();
     if (t.dataset.kartapne) return settKart(t.dataset.kartapne, "apen");
     if (t.dataset.kartlukk) return settKart(t.dataset.kartlukk, "liten");
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
@@ -2055,6 +2133,13 @@ const UI = (() => {
 
     if (t.dataset.day) { S.day = t.dataset.day; return render(); }
   });
+
+  // Blar du deg selv ned til bunnen, er meldingene ikke nye lenger.
+  $("screen").addEventListener("scroll", () => {
+    if (!S.nye || !S.openChat) return;
+    const sc = $("screen");
+    if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < 140) { S.nye = 0; render(); }
+  }, { passive: true });
 
   $("sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") closeSheet(); });
   document.addEventListener("keydown", e => {

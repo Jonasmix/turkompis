@@ -776,3 +776,88 @@ create index if not exists reactions_ch_idx  on public.reactions (channel_id);
 drop policy if exists mem_kick on public.members;
 
 notify pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 11 — levende program, ryddigere chatliste, brems på spam
+-- ═══════════════════════════════════════════════════════════════
+
+-- (A) Endrer reiselederen et klokkeslett under turen, skal det slå
+-- gjennom med én gang. Uten dette så en telefon som stod åpen hele dagen
+-- gammelt program helt til appen ble lukket og åpnet igjen.
+do $$
+begin
+  begin alter publication supabase_realtime add table public.items;  exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.days;   exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.places; exception when duplicate_object then null; end;
+end $$;
+
+-- (B) Siste melding i hver chat, én rad per chat. Appen hentet før de
+-- 300 siste meldingene i hele turen og plukket ut den nyeste per chat —
+-- er hovedchatten travel, kom ingen av de andre chattene med i det hele
+-- tatt. Funksjonen kjører som den som spør, så radsikkerheten gjelder:
+-- private chatter du ikke er med i, er ikke med i svaret.
+create or replace function public.siste_meldinger(p_trip uuid)
+returns table (
+  channel_id uuid, txt text, author_name text, author_id uuid, created_at timestamptz
+) language sql stable set search_path = public as $$
+  select distinct on (m.channel_id)
+         m.channel_id, m.txt, m.author_name, m.author_id, m.created_at
+    from public.messages m
+   where m.trip_id = p_trip
+   order by m.channel_id, m.created_at desc;
+$$;
+
+revoke all on function public.siste_meldinger(uuid) from public;
+grant execute on function public.siste_meldinger(uuid) to authenticated;
+
+-- (D) Å slette turen sletter program, chatter og alle meldinger for alle.
+-- Det skal ikke enhver du har gjort til reiseleder kunne gjøre — bare den
+-- som laget turen, eller en admin.
+create or replace function public.er_admin(p_trip uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from public.members
+    where trip_id = p_trip and user_id = auth.uid() and role = 'admin'
+  );
+$$;
+
+drop policy if exists trips_delete on public.trips;
+create policy trips_delete on public.trips for delete using (
+  created_by = auth.uid() or public.er_admin(id)
+);
+
+-- (E) Én person skal ikke kunne fylle chatten for nittini andre.
+-- Tjue meldinger i minuttet er langt mer enn noen skriver i vanlig prat,
+-- og stopper både utilsiktede løkker og noen som holder inne send.
+create index if not exists messages_author_idx on public.messages (author_id, created_at desc);
+
+create or replace function public.brems_meldinger()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  select count(*) into n from public.messages
+   where author_id = new.author_id and created_at > now() - interval '1 minute';
+  if n >= 20 then raise exception 'for_mange_meldinger'; end if;
+  return new;
+end; $$;
+
+drop trigger if exists brems_meldinger on public.messages;
+create trigger brems_meldinger before insert on public.messages
+  for each row execute function public.brems_meldinger();
+
+-- Og ikke fylle chatlista med tomme grupper heller.
+create or replace function public.brems_chatter()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  select count(*) into n from public.channels
+   where trip_id = new.trip_id and created_by = new.created_by;
+  if n >= 10 then raise exception 'for_mange_chatter'; end if;
+  return new;
+end; $$;
+
+drop trigger if exists brems_chatter on public.channels;
+create trigger brems_chatter before insert on public.channels
+  for each row execute function public.brems_chatter();
+
+notify pgrst, 'reload schema';
