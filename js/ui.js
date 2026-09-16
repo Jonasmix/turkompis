@@ -2419,6 +2419,13 @@ const UI = (() => {
           følger turen, endrer seg med valget over.</p>
       </div>
 
+      ${!altVirker ? "" : `<div style="margin-top:18px">
+        <button class="linkbtn" id="testServer" style="font-size:13px">Send et testvarsel hit</button>
+        ${S.varselTest ? `<div class="card pad" style="padding-block:12px;margin-top:8px;
+             border-left:3px solid var(--${S.varselTest.ok ? "moss" : "amber"})">
+           <p style="margin:0;font-size:13.5px;color:var(--ink-2)">${esc(S.varselTest.tekst)}</p></div>` : ""}
+      </div>`}
+
       ${altVirker ? "" : `<div>
         <div class="eyebrow" style="margin:20px 0 8px">Virker det?</div>
         <div class="card pad" style="padding-block:6px">
