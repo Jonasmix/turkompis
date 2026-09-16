@@ -4,7 +4,8 @@ const UI = (() => {
 
   const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false,
     nye: 0, sistAntall: 0, beholdSkroll: null,
-    side: null, varselStatus: null, varselEnheter: null, varselTest: null };
+    side: null, varselStatus: null, varselEnheter: null, varselTest: null,
+    folk: null, folkFeil: false, sisteVisning: null };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -915,7 +916,7 @@ const UI = (() => {
     $("convhead").hidden = !(conv || side);
     $("convWho").hidden = Boolean(side);
     if (side) {
-      $("convName").textContent = "Varsler";
+      $("convName").textContent = side === "deltakere" ? "Deltakere og roller" : "Varsler";
       $("convSub").textContent = S.trip.name;
     } else if (conv) {
       $("convName").textContent = conv.name;
@@ -954,11 +955,19 @@ const UI = (() => {
       if (antall) Api.settLest(S.trip.id, conv.id, msgs[antall - 1].ts);
     }
 
+    // Bytter du skjermbilde, skal du begynne på toppen av det nye — ikke
+    // stå midt nede fordi du var langt nede i det forrige.
+    const visning = side || S.tab + (S.openChat || "");
+    const byttetVisning = visning !== S.sisteVisning;
+    S.sisteVisning = visning;
+
     $("screen").innerHTML = side === "varsler" ? viewVarsler()
+                          : side === "deltakere" ? viewDeltakere()
                           : S.tab === "program" ? viewProgram()
                           : S.tab === "chat" ? viewChat()
                           : viewMe();
     if (side === "varsler") settOppVarsler();
+    if (byttetVisning && !conv) $("screen").scrollTop = 0;
 
     const slot = $("composerSlot");
     if (conv && !S.offline) {
@@ -1887,53 +1896,60 @@ const UI = (() => {
 
 
 
-  /* Deltakere på turen, og hvem som er reiseleder. */
-  async function sheetTripMembers() {
+  /* Deltakere på turen, og hvem som er reiseleder. Egen side, ikke et
+     ark: lista blir lang i en klasse på hundre, og et ark man kan dra ned
+     midt i en rulling er bare i veien. */
+  async function aapneDeltakere(fraHistorikk) {
+    S.side = "deltakere";
+    S.folk = null;
+    S.folkFeil = false;
+    if (!fraHistorikk) history.pushState({ side: "deltakere" }, "");
+    render();
+
+    try { S.folk = await Api.tripMembers(S.trip.id); }
+    catch { S.folk = []; S.folkFeil = true; }
+    if (S.side === "deltakere") render();
+  }
+
+  function viewDeltakere() {
     const leder = S.trip.role === "leader";
-    openSheet(`<h3>Deltakere</h3>
-      <p class="muted" style="margin:6px 0 14px">
+    const folk = S.folk;
+
+    const topp = `
+      <p class="muted" style="margin:0">
         ${leder
           ? "Reiseledere kan endre programmet og lese inn PDF-er. Du kan gi rollen videre."
           : "Reiseledere kan endre programmet."}</p>
-      ${leder ? `<label class="pick" style="margin-bottom:16px">
+      ${leder ? `<label class="pick" style="margin-top:14px">
         <input type="checkbox" id="krevGodkjenning" ${S.trip.krevGodkjenning ? "checked" : ""}>
         <span><b>Krev godkjenning for å bli med</b><br>
           <small>Nye deltakere må slippes inn av en reiseleder. Turkoden alene holder ikke.</small></span>
-      </label>` : ""}
-      <div id="tmBody">${venter("Henter")}</div>
-      <button class="btn close" data-close>Lukk</button>`);
+      </label>` : ""}`;
 
-    const bryter = $("krevGodkjenning");
-    if (bryter) bryter.addEventListener("change", async () => {
-      try {
-        await Api.setKrevGodkjenning(S.trip.id, bryter.checked);
-        S.trip.krevGodkjenning = bryter.checked;
-        toast(bryter.checked ? "Nye må nå godkjennes." : "Alle med koden slipper inn.");
-      } catch {
-        bryter.checked = !bryter.checked;
-        toast("Klarte ikke lagre. Har du kjørt siste SQL?");
-      }
-    });
+    if (S.folkFeil) return `<div>${topp}</div><p class="muted">Klarte ikke hente deltakerlista.</p>`;
+    if (!folk) return `<div>${topp}</div>${venter("Henter deltakere")}`;
 
-    try {
-      const folk = await Api.tripMembers(S.trip.id);
-      const ventende = folk.filter(p => p.venter);
-      const med = folk.filter(p => !p.venter);
-      const ledere = med.filter(p => p.role === "leader");
+    const ventende = folk.filter(p => p.venter);
+    const med = folk.filter(p => !p.venter);
+    const ledere = med.filter(p => p.role === "leader");
 
-      $("tmBody").innerHTML = `
-        ${ventende.length ? `
-          <div class="eyebrow" style="margin-bottom:7px;color:var(--amber)">Venter på svar · ${ventende.length}</div>
-          <div class="memberlist" style="margin-bottom:18px">${ventende.map(p => `
-            <div class="person">
-              <span>${esc(p.name)}</span>
-              <span style="display:flex;gap:10px;flex:none">
-                <button class="linkbtn" data-godkjenn="${esc(p.id)}">slipp inn</button>
-                <button class="linkbtn" style="color:var(--danger)" data-avvis="${esc(p.id)}">avvis</button>
-              </span>
-            </div>`).join("")}</div>` : ""}
+    return `
+      <div>${topp}</div>
 
-        <div class="eyebrow" style="margin-bottom:7px">Med på turen · ${med.length}</div>
+      ${ventende.length ? `<div>
+        <div class="eyebrow" style="margin-bottom:8px;color:var(--amber)">Venter på svar · ${ventende.length}</div>
+        <div class="memberlist">${ventende.map(p => `
+          <div class="person">
+            <span>${esc(p.name)}</span>
+            <span style="display:flex;gap:10px;flex:none">
+              <button class="linkbtn" data-godkjenn="${esc(p.id)}">slipp inn</button>
+              <button class="linkbtn" style="color:var(--danger)" data-avvis="${esc(p.id)}">avvis</button>
+            </span>
+          </div>`).join("")}</div>
+      </div>` : ""}
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Med på turen · ${med.length}</div>
         <div class="memberlist">${med.map(p => `
           <div class="person">
             <span>${esc(p.name)}${p.me ? " <em>deg</em>" : ""}${p.role === "leader" ? ' <em>reiseleder</em>' : ""}</span>
@@ -1944,28 +1960,9 @@ const UI = (() => {
               <button class="linkbtn" style="color:var(--danger)" data-fjern="${esc(p.id)}" data-navn="${esc(p.name)}">fjern</button>
             </span>` : ""}
           </div>`).join("")}</div>
-        ${leder ? `<p class="muted" style="margin-top:12px">Den som laget turen beholder lederrollen,
-          og turen må alltid ha minst én.</p>` : ""}`;
-
-      $("tmBody").addEventListener("click", async ev => {
-        const b = ev.target.closest("[data-rolle],[data-godkjenn],[data-avvis],[data-fjern]");
-        if (!b) return;
-        // Å fjerne noen er ikke til å angre på, så vi spør først. Meldingene
-        // deres blir stående, men tilgangen forsvinner med én gang.
-        if (b.dataset.fjern &&
-            !confirm(`Fjerne ${b.dataset.navn} fra turen? Da mister de tilgangen til program og chatter, og trenger turkoden på nytt for å komme inn igjen.`)) return;
-        try {
-          if (b.dataset.godkjenn) await Api.godkjennDeltaker(S.trip.id, b.dataset.godkjenn);
-          else if (b.dataset.avvis) await Api.avvisDeltaker(S.trip.id, b.dataset.avvis);
-          else if (b.dataset.fjern) await Api.fjernDeltaker(S.trip.id, b.dataset.fjern);
-          else await Api.setMemberRole(S.trip.id, b.dataset.rolle, b.dataset.til);
-          await openTrip(S.trip.id);
-          sheetTripMembers();
-        } catch (e) { toast(e.message || "Klarte ikke endre."); }
-      });
-    } catch {
-      $("tmBody").innerHTML = `<p class="muted">Klarte ikke hente deltakerlista.</p>`;
-    }
+        ${leder ? `<p class="muted" style="margin-top:10px">Den som laget turen beholder lederrollen,
+          og turen må alltid ha minst én.</p>` : ""}
+      </div>`;
   }
   /* ───────────────── innlogging med e-post ─────────────────
      Egen side, ikke et ark: skjemaet er kort, men tastaturet tar halve
@@ -2287,21 +2284,6 @@ const UI = (() => {
       aapneVarsler(true);
     });
 
-    const skjerm = $("screen");
-    skjerm.addEventListener("change", async ev => {
-      const m = ev.target;
-      try {
-        if (m.name === "turniva") {
-          await Api.settVarselNiva(S.trip.id, null, m.value);
-          toast("Lagret for hele turen.");
-          render();
-        } else if (m.dataset.chatniva) {
-          await Api.settVarselNiva(S.trip.id, m.dataset.chatniva, m.value);
-          toast("Lagret for chatten.");
-        }
-      } catch (e) { toast(e.message || "Klarte ikke lagre."); }
-    });
-
     const lokal = $("testLokalt");
     if (lokal) lokal.addEventListener("click", async () => {
       try {
@@ -2359,7 +2341,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2442,6 +2424,22 @@ const UI = (() => {
     if (t.dataset.members) return sheetChannelMembers(t.dataset.members);
     if (t.dataset.skjul) return skjulOppgave(t.dataset.skjul, t.dataset.skjulid, true);
     if (t.dataset.vis) { closeSheet(); return skjulOppgave(t.dataset.vis, t.dataset.visid, false); }
+    // Deltakersiden: roller, godkjenning og fjerning.
+    if (t.dataset.rolle || t.dataset.godkjenn || t.dataset.avvis || t.dataset.fjern) {
+      // Å fjerne noen er ikke til å angre på, så vi spør først. Meldingene
+      // deres blir stående, men tilgangen forsvinner med én gang.
+      if (t.dataset.fjern &&
+          !confirm(`Fjerne ${t.dataset.navn} fra turen? Da mister de tilgangen til program og chatter, og trenger turkoden på nytt for å komme inn igjen.`)) return;
+      try {
+        if (t.dataset.godkjenn) await Api.godkjennDeltaker(S.trip.id, t.dataset.godkjenn);
+        else if (t.dataset.avvis) await Api.avvisDeltaker(S.trip.id, t.dataset.avvis);
+        else if (t.dataset.fjern) await Api.fjernDeltaker(S.trip.id, t.dataset.fjern);
+        else await Api.setMemberRole(S.trip.id, t.dataset.rolle, t.dataset.til);
+        await openTrip(S.trip.id);
+        return aapneDeltakere(true);
+      } catch (e) { return toast(e.message || "Klarte ikke endre."); }
+    }
+
     if (t.dataset.nye) { S.nye = 0; S.tilBunn = true; return render(); }
     if (t.dataset.eldre) return hentEldre();
     if (t.dataset.kartapne) return settKart(t.dataset.kartapne, "apen");
@@ -2462,7 +2460,7 @@ const UI = (() => {
     if (t.dataset.sheet === "addday") return sheetAddDay();
     if (t.dataset.sheet === "additem") return sheetAddItem(t.dataset.day);
     if (t.dataset.sheet === "hotel") return sheetHotel(t.dataset.day);
-    if (t.dataset.sheet === "deltakere") return sheetTripMembers();
+    if (t.dataset.sheet === "deltakere") { closeSheet(); return aapneDeltakere(); }
     if (t.dataset.sheet === "varsler") { closeSheet(); return aapneVarsler(); }
     if (t.dataset.sheet === "logginn") return visAuth("logginn");
     if (t.dataset.sheet === "koblepost") { closeSheet(); return visAuth("koble"); }
@@ -2471,6 +2469,37 @@ const UI = (() => {
     if (t.dataset.sheet === "importpdf") return sheetImportPdf();
 
     if (t.dataset.day) { S.day = t.dataset.day; return render(); }
+  });
+
+  /* Valg som lagres i det du endrer dem. Lytteren ligger på dokumentet,
+     ikke på skjermen: sidene tegnes på nytt hver gang noe kommer inn
+     utenfra, og en lytter per tegning ville blitt til hundre. */
+  document.addEventListener("change", async e => {
+    const m = e.target;
+    if (!S.trip) return;
+
+    if (m.id === "krevGodkjenning") {
+      try {
+        await Api.setKrevGodkjenning(S.trip.id, m.checked);
+        S.trip.krevGodkjenning = m.checked;
+        toast(m.checked ? "Nye må nå godkjennes." : "Alle med koden slipper inn.");
+      } catch {
+        m.checked = !m.checked;
+        toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+      }
+      return;
+    }
+
+    try {
+      if (m.name === "turniva") {
+        await Api.settVarselNiva(S.trip.id, null, m.value);
+        toast("Lagret for hele turen.");
+        render();
+      } else if (m.dataset && m.dataset.chatniva) {
+        await Api.settVarselNiva(S.trip.id, m.dataset.chatniva, m.value);
+        toast("Lagret for chatten.");
+      }
+    } catch (err) { toast(err.message || "Klarte ikke lagre."); }
   });
 
   // Blar du deg selv ned til bunnen, er meldingene ikke nye lenger.
