@@ -15,14 +15,16 @@
  * En admin regnes som vanlig deltaker her. Ellers ville den skjulte
  * rollen røpet seg ved at folk fikk varsel om alt hen skrev.
  *
- * Denne funksjonen snakker med databasen over vanlig HTTP i stedet for å
- * bruke supabase-js. Grunnen er tid: funksjonen starter kaldt nesten hver
- * gang, og da må hele biblioteket lastes inn før første linje kjører —
- * det kostet ti sekunder før varselet i det hele tatt ble sendt. Her
- * gjøres bare de spørringene vi trenger, med fetch.
+ * Filen har ingen import. Det er et bevisst valg, og det handler om tid:
+ * funksjonen starter kald nesten hver gang, og målingene viste at det å
+ * laste inn bibliotekene tok tre til fire sekunder før første linje kode
+ * kjørte. Derfor er både databasekallene og krypteringen skrevet ut her.
+ * Alt som trengs ligger i nettleserstandardene Deno har fra før.
+ *
+ * Krypteringen følger RFC 8291 (aes128gcm) og RFC 8292 (VAPID), og er
+ * prøvd mot testverdiene i RFC 8291 punkt 5: ECDH-hemmeligheten, CEK,
+ * nonce og hele meldingskroppen kom ut likt.
  */
-
-import * as webpush from "jsr:@negrel/webpush@0.5.0";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -38,6 +40,38 @@ const svar = (kropp: unknown, status = 200) =>
 const BASE = Deno.env.get("SUPABASE_URL") || "";
 const TJENER = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") || "";
+
+/* ───────────────── små hjelpere ───────────────── */
+
+const tekst = (s: string) => new TextEncoder().encode(s);
+
+function fraB64u(s: string): Uint8Array {
+  const r = s.replace(/-/g, "+").replace(/_/g, "/");
+  const b = atob(r + "=".repeat((4 - r.length % 4) % 4));
+  return Uint8Array.from(b, c => c.charCodeAt(0));
+}
+
+function tilB64u(u: Uint8Array): string {
+  let s = "";
+  for (const b of u) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function slaaSammen(...deler: Uint8Array[]): Uint8Array {
+  const ut = new Uint8Array(deler.reduce((n, d) => n + d.length, 0));
+  let i = 0;
+  for (const d of deler) { ut.set(d, i); i += d.length; }
+  return ut;
+}
+
+async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, lengde: number) {
+  const k = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, k, lengde * 8)
+  );
+}
+
+/* ───────────────── databasen over vanlig HTTP ───────────────── */
 
 /* Leser med tjenernøkkelen, altså forbi radsikkerheten. Det er nødvendig:
    funksjonen skal se hvem andre som skal varsles, og det har ikke den som
@@ -57,7 +91,6 @@ async function slett(sti: string) {
   }).catch(() => {});
 }
 
-/* Hvem er det som spør? Billetten sjekkes av Supabase selv. */
 async function hvemErJeg(auth: string) {
   const r = await fetch(`${BASE}/auth/v1/user`, {
     headers: { apikey: ANON, Authorization: auth }
@@ -68,53 +101,143 @@ async function hvemErJeg(auth: string) {
 
 const uuid = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
 
-let server: webpush.ApplicationServer | null = null;
+/* ───────────────── VAPID: hvem sender ─────────────────
+   Et signert kort som sier «dette er TourFlow». Apple og Google krever
+   det, og det er det samme kortet til alle mottakere hos samme tjeneste
+   — derfor lages det én gang i timen, ikke én gang per varsel. */
 
-async function appServer() {
-  if (server) return server;
+let vapid: { priv: CryptoKey; pubRaw: Uint8Array; kontakt: string } | null = null;
+const kort = new Map<string, { jwt: string; utloper: number }>();
+
+async function vapidNokler() {
+  if (vapid) return vapid;
+
   const raa = Deno.env.get("VAPID_KEYS");
   if (!raa) throw new Error("VAPID_KEYS mangler under Edge Functions → Secrets.");
 
-  let noekler;
-  try { noekler = JSON.parse(raa); }
+  let n: { publicKey?: JsonWebKey; privateKey?: JsonWebKey };
+  try { n = JSON.parse(raa); }
   catch { throw new Error("VAPID_KEYS er ikke gyldig JSON. Lim inn hele filen på én linje."); }
-  if (!noekler?.publicKey || !noekler?.privateKey) {
-    throw new Error("VAPID_KEYS mangler publicKey eller privateKey.");
-  }
+  if (!n.publicKey || !n.privateKey) throw new Error("VAPID_KEYS mangler publicKey eller privateKey.");
 
   try {
-    server = await webpush.ApplicationServer.new({
-      contactInformation: "mailto:" + (Deno.env.get("VAPID_KONTAKT") || "post@example.com"),
-      vapidKeys: await webpush.importVapidKeys(noekler, { extractable: false })
-    });
+    const priv = await crypto.subtle.importKey(
+      "jwk", n.privateKey, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+    const pub = await crypto.subtle.importKey(
+      "jwk", n.publicKey, { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"]);
+    vapid = {
+      priv,
+      pubRaw: new Uint8Array(await crypto.subtle.exportKey("raw", pub)),
+      kontakt: "mailto:" + (Deno.env.get("VAPID_KONTAKT") || "post@example.com")
+    };
   } catch (e) {
     throw new Error("Klarte ikke lese VAPID_KEYS: " + (e instanceof Error ? e.message : String(e)));
   }
-  return server;
+  return vapid;
+}
+
+async function vapidKort(opprinnelse: string) {
+  const v = await vapidNokler();
+  const naa = Math.floor(Date.now() / 1000);
+
+  const lagret = kort.get(opprinnelse);
+  if (lagret && lagret.utloper > naa + 300) return lagret.jwt;
+
+  const utloper = naa + 3600;
+  const hode = tilB64u(tekst(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const krav = tilB64u(tekst(JSON.stringify({ aud: opprinnelse, exp: utloper, sub: v.kontakt })));
+  const grunnlag = `${hode}.${krav}`;
+
+  const signatur = new Uint8Array(await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" }, v.priv, tekst(grunnlag)));
+
+  const jwt = `${grunnlag}.${tilB64u(signatur)}`;
+  kort.set(opprinnelse, { jwt, utloper });
+  return jwt;
+}
+
+/* ───────────────── selve varselet ─────────────────
+   Innholdet krypteres for hver enkelt mottaker med nøkler bare den
+   telefonen har. Verken Apple, Google eller vi kan lese det underveis —
+   serveren sender en boks bare mottakeren kan åpne. */
+
+type Enhet = { endpoint: string; p256dh: string; auth: string };
+
+async function krypter(enhet: Enhet, nyttelast: string) {
+  const uaPubRaa = fraB64u(enhet.p256dh);
+  const hemmelighet = fraB64u(enhet.auth);
+
+  // Et ferskt nøkkelpar per varsel — slik krever standarden.
+  const par = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]) as CryptoKeyPair;
+  const asPubRaa = new Uint8Array(await crypto.subtle.exportKey("raw", par.publicKey));
+
+  const uaPub = await crypto.subtle.importKey(
+    "raw", uaPubRaa, { name: "ECDH", namedCurve: "P-256" }, true, []);
+  const delt = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: "ECDH", public: uaPub }, par.privateKey, 256));
+
+  const noekkelinfo = slaaSammen(tekst("WebPush: info\0"), uaPubRaa, asPubRaa);
+  const ikm = await hkdf(hemmelighet, delt, noekkelinfo, 32);
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(salt, ikm, tekst("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, tekst("Content-Encoding: nonce\0"), 12);
+
+  const aes = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["encrypt"]);
+  // 0x02 markerer at dette er siste blokk.
+  const innhold = slaaSammen(tekst(nyttelast), new Uint8Array([2]));
+  const kryptert = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce, tagLength: 128 }, aes, innhold));
+
+  const blokkstorrelse = new Uint8Array(4);
+  new DataView(blokkstorrelse.buffer).setUint32(0, 4096);
+
+  return slaaSammen(salt, blokkstorrelse, new Uint8Array([asPubRaa.length]), asPubRaa, kryptert);
+}
+
+class PushFeil extends Error {
+  constructor(public status: number, public tekst: string) {
+    super(`${status} ${tekst}`);
+  }
+  get borte() { return this.status === 404 || this.status === 410; }
+}
+
+async function sendEn(enhet: Enhet, nyttelast: string) {
+  const v = await vapidNokler();
+  const opprinnelse = new URL(enhet.endpoint).origin;
+  const kropp = await krypter(enhet, nyttelast);
+
+  const r = await fetch(enhet.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
+      // «high» ber Apple og Google levere med én gang. Uten den samler
+      // telefonen opp varsler og viser dem når det passer den — greit for
+      // et nyhetsbrev, ikke for «møt på hotellet om ti minutter».
+      "Urgency": "high",
+      "TTL": "3600",
+      "Authorization": `vapid t=${await vapidKort(opprinnelse)}, k=${tilB64u(v.pubRaw)}`
+    },
+    body: kropp
+  });
+
+  if (!r.ok) throw new PushFeil(r.status, (await r.text().catch(() => "")).slice(0, 200));
 }
 
 /* Sender til en bunke enheter. Feiler én, skal de andre likevel få sitt. */
-async function sendTil(
-  tjener: webpush.ApplicationServer,
-  enheter: Array<{ endpoint: string; p256dh: string; auth: string }>,
-  nyttelast: string
-) {
+async function sendTil(enheter: Enhet[], nyttelast: string) {
   let sendt = 0;
   const doede: string[] = [];
   const feil: string[] = [];
 
   await Promise.all(enheter.map(async (e) => {
-    try {
-      await tjener.subscribe({ endpoint: e.endpoint, keys: { p256dh: e.p256dh, auth: e.auth } })
-        // «high» ber Apple og Google levere med én gang. Uten den samler
-        // telefonen opp varsler og viser dem når det passer den — greit
-        // for et nyhetsbrev, ikke for «møt på hotellet om ti minutter».
-        .pushTextMessage(nyttelast, { ttl: 3600, urgency: webpush.Urgency.High });
-      sendt++;
-    } catch (err) {
-      // 410 betyr at nettleseren har kastet abonnementet — da rydder vi.
-      if (err instanceof webpush.PushMessageError && err.isGone()) doede.push(e.endpoint);
-      else feil.push(err instanceof Error ? err.toString() : String(err));
+    try { await sendEn(e, nyttelast); sendt++; }
+    catch (err) {
+      // 404 og 410 betyr at nettleseren har kastet abonnementet — da rydder vi.
+      if (err instanceof PushFeil && err.borte) doede.push(e.endpoint);
+      else feil.push(err instanceof Error ? err.message : String(err));
     }
   }));
 
@@ -133,6 +256,8 @@ function manglerNokkel(e: unknown) {
     : " Fant ingen hemmelighet med «vapid» i navnet.";
   return (e instanceof Error ? e.message : String(e)) + hint;
 }
+
+/* ───────────────── forespørselen ───────────────── */
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -153,16 +278,14 @@ Deno.serve(async (req) => {
      eller Google, og service workeren på telefonen — så et svar herfra
      sier nøyaktig hvor det eventuelt stopper. */
   if (kropp.test) {
-    const mine = await les<{ endpoint: string; p256dh: string; auth: string }>(
-      `push_subs?user_id=eq.${meg.id}&select=endpoint,p256dh,auth`);
+    const mine = await les<Enhet>(`push_subs?user_id=eq.${meg.id}&select=endpoint,p256dh,auth`);
     if (!mine.length) {
       return svar({ feil: "Ingen enheter har sagt ja til varsler for denne kontoen." }, 400);
     }
-    let tjener: webpush.ApplicationServer;
-    try { tjener = await appServer(); }
+    try { await vapidNokler(); }
     catch (e) { return svar({ feil: manglerNokkel(e) }, 500); }
 
-    const res = await sendTil(tjener, mine, JSON.stringify({
+    const res = await sendTil(mine, JSON.stringify({
       t: "TourFlow", b: "Testvarsel — alt virker.", u: "", tag: "test"
     }));
     await ryddDoede(res.doede);
@@ -222,10 +345,10 @@ Deno.serve(async (req) => {
     `&user_id=in.(${mottakere.join(",")})&select=user_id,channel_id,niva`);
 
   const niva = (bruker: string) => {
-    const rader = valg.filter(v => v.user_id === bruker);
-    const forChat = rader.find(v => v.channel_id === kanal.id);
+    const mine = valg.filter(v => v.user_id === bruker);
+    const forChat = mine.find(v => v.channel_id === kanal.id);
     if (forChat) return forChat.niva;
-    const forTur = rader.find(v => v.channel_id == null);
+    const forTur = mine.find(v => v.channel_id == null);
     return forTur ? forTur.niva : "viktig";
   };
 
@@ -237,7 +360,7 @@ Deno.serve(async (req) => {
   });
   if (!skalHa.length) return svar({ sendt: 0 });
 
-  const enheter = await les<{ endpoint: string; p256dh: string; auth: string }>(
+  const enheter = await les<Enhet>(
     `push_subs?user_id=in.(${skalHa.join(",")})&select=endpoint,p256dh,auth`);
   if (!enheter.length) return svar({ sendt: 0 });
 
@@ -249,14 +372,13 @@ Deno.serve(async (req) => {
     tag: kanal.id
   });
 
-  let tjener: webpush.ApplicationServer;
-  try { tjener = await appServer(); }
+  try { await vapidNokler(); }
   catch (e) {
     console.error("varsel-oppsett:", e);
     return svar({ feil: "Varsler er ikke satt opp på serveren." }, 500);
   }
 
-  const res = await sendTil(tjener, enheter, nyttelast);
+  const res = await sendTil(enheter, nyttelast);
   await ryddDoede(res.doede);
   if (res.feil.length) console.error("varsel-sending:", res.feil[0]);
 
