@@ -230,6 +230,11 @@ button,input,select,textarea{font:inherit;color:inherit}
 .toast{position:fixed;left:50%;bottom:calc(84px + var(--safe-b));transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--ground);padding:11px 16px;border-radius:11px;font-size:14px;font-weight:600;
   box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;text-align:center}
+/* Kom stripa av en melding, kan den trykkes på for å gå dit. */
+.toast.klikkbar{cursor:pointer;border-left:3px solid var(--amber);text-align:left;
+  padding-right:34px;background-image:linear-gradient(transparent,transparent)}
+.toast.klikkbar::after{content:"›";position:absolute;right:14px;top:50%;
+  transform:translateY(-52%);font-size:19px;opacity:.6}
 
 /* ---------- deltakere i chat ---------- */
 .memberlist{border:1px solid var(--line-soft);border-radius:12px;overflow:hidden}

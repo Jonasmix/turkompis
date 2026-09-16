@@ -278,6 +278,7 @@ Deno.serve(async (req) => {
      eller Google, og service workeren på telefonen — så et svar herfra
      sier nøyaktig hvor det eventuelt stopper. */
   if (kropp.test) {
+    const t0 = Date.now();
     const mine = await les<Enhet>(`push_subs?user_id=eq.${meg.id}&select=endpoint,p256dh,auth`);
     if (!mine.length) {
       return svar({ feil: "Ingen enheter har sagt ja til varsler for denne kontoen." }, 400);
@@ -285,14 +286,20 @@ Deno.serve(async (req) => {
     try { await vapidNokler(); }
     catch (e) { return svar({ feil: manglerNokkel(e) }, 500); }
 
+    const t1 = Date.now();
     const res = await sendTil(mine, JSON.stringify({
       t: "TourFlow", b: "Testvarsel — alt virker.", u: "", tag: "test"
     }));
+    const t2 = Date.now();
     await ryddDoede(res.doede);
 
+    // Tiden inne i funksjonen, målt for seg. Ser appen at hele kallet tok
+    // ti sekunder mens dette sier ett, ligger resten i oppstarten hos
+    // Supabase — og da er det ikke noe mer å hente i koden vår.
     return svar({
       sendt: res.sendt, enheter: mine.length,
-      utgaatt: res.doede.length, feil: res.feil[0] || null
+      utgaatt: res.doede.length, feil: res.feil[0] || null,
+      ms: { database: t1 - t0, sending: t2 - t1 }
     });
   }
 

@@ -616,6 +616,7 @@ const Api = (() => {
   async function testVarsel() {
     const { data } = await sb.auth.getSession();
     if (!data.session) throw new Error("Du er ikke innlogget.");
+    const start = Date.now();
     const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
       method: "POST",
       headers: {
@@ -633,7 +634,9 @@ const Api = (() => {
         { kjent: true }
       );
     }
-    return svar || {};
+    // Hele kallet sett fra telefonen. Sammenliknet med tiden funksjonen
+    // selv målte, viser det hvor mye som går med til oppstart.
+    return Object.assign(svar || {}, { totalt: Date.now() - start });
   }
 
   /* Nivåene ligger i basen, ikke på telefonen: bytter du telefon, skal

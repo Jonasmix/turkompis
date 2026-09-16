@@ -52,11 +52,15 @@ const UI = (() => {
   const prikker = () => '<span class="prikker"><i></i><i></i><i></i></span>';
   const venter = tekst => `<div class="venter">${prikker()} ${esc(tekst)}</div>`;
 
-  function toast(text) {
+  /* Stripa nederst. Får den et mål, kan den trykkes på — det brukes når
+     en melding kommer inn mens du ser på noe annet i appen. */
+  function toast(text, maal) {
     const t = $("toast");
     t.textContent = text; t.hidden = false;
+    t.classList.toggle("klikkbar", Boolean(maal));
+    t.onclick = maal ? () => { t.hidden = true; aapneFraVarsel(maal); } : null;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { t.hidden = true; }, 3000);
+    toast._t = setTimeout(() => { t.hidden = true; t.onclick = null; }, maal ? 6000 : 3000);
   }
 
   /* ───────────────── varsel → riktig chat ─────────────────
@@ -86,7 +90,15 @@ const UI = (() => {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("message", e => {
       const adresse = e.data && e.data.aapne;
-      if (adresse) aapneFraVarsel(lenkemaal(adresse.replace(/^\?/, "")));
+      if (adresse) return aapneFraVarsel(lenkemaal(adresse.replace(/^\?/, "")));
+
+      // Varsel som kom mens appen var framme. Står du i chatten det
+      // gjelder, ser du meldingen komme av seg selv — da er en stripe på
+      // toppen bare støy. Ellers får du vite det, og kan trykke deg dit.
+      const v = e.data && e.data.varsel;
+      if (!v) return;
+      if (S.openChat && v.tag === S.openChat) return;
+      toast(v.b || "Ny melding", v.u ? lenkemaal(String(v.u).replace(/^\?/, "")) : null);
     });
   }
 
@@ -2277,8 +2289,14 @@ const UI = (() => {
       server.disabled = true; server.innerHTML = prikker() + " Sender";
       try {
         const r = await Api.testVarsel();
+        const s = ms => (ms / 1000).toFixed(1).replace(".", ",") + " s";
+        const tider = r.ms
+          ? ` Hele kallet tok ${s(r.totalt)}: ${s(r.ms.database)} i databasen, ` +
+            `${s(r.ms.sending)} ut til Apple eller Google, og ` +
+            `${s(Math.max(0, r.totalt - r.ms.database - r.ms.sending))} på å starte opp hos Supabase.`
+          : "";
         S.varselTest = r.sendt
-          ? { ok: true, tekst: `Serveren sendte til ${r.sendt} av ${r.enheter} enhet(er). Kommer det ingenting fram nå, er det telefonen som holder det tilbake.` }
+          ? { ok: true, tekst: `Serveren sendte til ${r.sendt} av ${r.enheter} enhet(er).` + tider }
           : { ok: false, tekst: r.feil || "Serveren nådde ingen enheter." };
       } catch (e) {
         S.varselTest = { ok: false, tekst: e.message || "Testen nådde ikke serveren." };

@@ -5,7 +5,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 54;
+const BUILD = 55;
 const CACHE = "tourflow-b" + BUILD;
 
 const SHELL = [
@@ -50,13 +50,26 @@ self.addEventListener("activate", e => {
 self.addEventListener("push", e => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { /* tomt varsel */ }
-  e.waitUntil(self.registration.showNotification(d.t || "TourFlow", {
-    body: d.b || "",
-    tag: d.tag || "tourflow",          // nye varsel om samme chat erstatter det gamle
-    icon: "icons/icon-192.png",
-    badge: "icons/icon-192.png",
-    data: { url: d.u || "./" }
-  }));
+
+  e.waitUntil((async () => {
+    // Sitter du med appen framme, skal ikke telefonen pipe — du ser jo
+    // meldingen komme. Da sier vi fra til siden i stedet, og den avgjør
+    // selv om det er verdt en liten stripe på skjermen.
+    const vinduer = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const framme = vinduer.find(v => v.visibilityState === "visible");
+    if (framme) {
+      framme.postMessage({ varsel: d });
+      return;
+    }
+
+    return self.registration.showNotification(d.t || "TourFlow", {
+      body: d.b || "",
+      tag: d.tag || "tourflow",        // nytt varsel om samme chat erstatter det gamle
+      icon: "icons/icon-192.png",
+      badge: "icons/icon-192.png",
+      data: { url: d.u || "./" }
+    });
+  })());
 });
 
 // Trykker du på varselet, skal du havne i riktig chat — i vinduet som
