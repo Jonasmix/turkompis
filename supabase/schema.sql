@@ -940,3 +940,42 @@ grant execute on function public.lagre_push(text, text, text) to authenticated;
 grant execute on function public.sett_varselniva(uuid, uuid, text) to authenticated;
 
 notify pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 13 — er du her allerede?
+-- ═══════════════════════════════════════════════════════════════
+
+-- iPhone viser et varsel selv om appen sier fra at den ikke vil vise
+-- noe — reglene tillater nettleseren å gjøre det. Eneste sikre måte å
+-- slippe pling mens du sitter med appen framme, er derfor å ikke sende
+-- varselet i det hele tatt. Da må serveren vite hvem som er til stede.
+--
+-- Raden er din egen og din alene: ingen andre kan lese hvor du er. Dette
+-- er ikke en «hvem er pålogget»-liste, og skal ikke bli det.
+create table if not exists public.tilstede (
+  user_id    uuid primary key default auth.uid(),
+  trip_id    uuid references public.trips(id) on delete cascade,
+  channel_id uuid references public.channels(id) on delete set null,
+  sett       timestamptz not null default now()
+);
+
+alter table public.tilstede enable row level security;
+drop policy if exists td_own on public.tilstede;
+create policy td_own on public.tilstede for all
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+create or replace function public.jeg_er_her(p_trip uuid, p_channel uuid)
+returns boolean language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null then return false; end if;
+  insert into public.tilstede (user_id, trip_id, channel_id, sett)
+  values (auth.uid(), p_trip, p_channel, now())
+  on conflict (user_id) do update
+    set trip_id = excluded.trip_id, channel_id = excluded.channel_id, sett = now();
+  return true;
+end; $$;
+
+revoke all on function public.jeg_er_her(uuid, uuid) from public;
+grant execute on function public.jeg_er_her(uuid, uuid) to authenticated;
+
+notify pgrst, 'reload schema';

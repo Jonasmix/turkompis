@@ -514,6 +514,18 @@ label.person span{flex:1;min-width:0}
 .sjekknei{background:var(--amber);color:#fff}
 .sjekkmidt{background:var(--surface-2);color:var(--ink-3)}
 
+/* En chat i varselinnstillingene skal se ut som en chat, ikke som et
+   ord i en liste — ellers er det ikke opplagt hva «Hele turen» er. */
+.chatnavn{display:flex;align-items:center;gap:10px;min-width:0}
+.chatikon{
+  width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:var(--blue-soft);color:var(--blue-ink);font-size:14px;
+}
+.chatikon svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+.chatnavn b{display:block;font-family:"Archivo",sans-serif;font-weight:600;font-size:14.5px}
+.chatnavn small{display:block;font-size:12px;color:var(--ink-3)}
+
 /* Liten nivåvelger inne i en rad — brukes per chat i varselinnstillingene */
 .minivalg{
   width:auto;flex:none;padding:7px 30px 7px 11px;font-size:13.5px;min-height:36px;

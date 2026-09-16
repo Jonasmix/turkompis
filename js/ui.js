@@ -143,11 +143,20 @@ const UI = (() => {
     // Kommer det noe utenfra — meldinger, reaksjoner, vær, eller et
     // program en reiseleder nettopp endret — tegner vi på nytt. Turen
     // hentes fra Api, for endrer programmet seg er den vi holder utdatert.
-    Api.onChange(() => {
+    Api.onChange(hendelse => {
       if (!S.trip) return;
       const fersk = Api.currentTrip();
       if (fersk && fersk.id === S.trip.id) S.trip = fersk;
       render();
+
+      // Kom det en melding mens du har appen framme, sier appen fra selv.
+      // Telefonen gjør det ikke — serveren dropper varselet når du er her.
+      // Står du i chatten det gjelder, trenger du ingenting.
+      const ny = hendelse && hendelse.nyMelding;
+      if (!ny || ny.kanal === S.openChat) return;
+      const chat = S.trip.channels.find(c => c.id === ny.kanal);
+      toast(`${ny.hvem.split(" ")[0]} i ${chat ? chat.name : "en chat"}: ${ny.txt.slice(0, 60)}`,
+            { tur: ny.tur, chat: ny.kanal });
     });
 
     // Kom du hit fra et varsel, skal du havne i chatten varselet gjaldt.
@@ -270,6 +279,7 @@ const UI = (() => {
       Api.loadRecent(tripId).then(() => { if (S.tab === "chat" && !S.openChat) render(); }).catch(() => {});
       Api.lastVaer(tripId);
       Api.lastVarselvalg(tripId).catch(() => {});
+      Api.erHer(tripId, null);
       // Statusen trengs på Meg-fanen, ikke bare inne på varselsiden.
       Api.varselStatus().then(s => { if (s !== S.varselStatus) { S.varselStatus = s; render(); } });
       S.svarTil = null;
@@ -1123,7 +1133,7 @@ const UI = (() => {
     if (!fromHistory) history.pushState({ chat: channelId }, "");
     // Reaksjoner strømmes bare for samtalen du faktisk ser på. Samtidig
     // vekkes varselfunksjonen, så den er klar når du har skrevet ferdig.
-    if (!S.offline) { Api.subscribeChannel(channelId); Api.varmVarsler(); }
+    if (!S.offline) { Api.subscribeChannel(channelId); Api.varmVarsler(); Api.erHer(S.trip.id, channelId); }
     try { await Api.loadMessages(S.trip.id, channelId); }
     catch { toast("Klarte ikke hente meldingene."); }
     S.loadingChat = false;
@@ -1135,6 +1145,7 @@ const UI = (() => {
     S.openChat = null;
     S.nye = 0;
     Api.unsubscribeChannel();
+    Api.erHer(S.trip.id, null);
     render();
     if (!fromHistory && history.state && history.state.chat) history.back();
     return true;
@@ -1155,6 +1166,7 @@ const UI = (() => {
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === "hidden") {
       clearTimeout(bakgrunnstimer);
+      Api.ikkeHer();
       bakgrunnstimer = setTimeout(() => Api.kobleFra(), 30000);
       return;
     }
@@ -1166,6 +1178,7 @@ const UI = (() => {
     if (ventende && await aapneFraVarsel(ventende)) return;
 
     Api.subscribeTrip(S.trip.id);
+    Api.erHer(S.trip.id, S.openChat);
     if (S.openChat) {
       Api.subscribeChannel(S.openChat);
       await Api.loadMessages(S.trip.id, S.openChat).catch(() => {});
@@ -2312,6 +2325,10 @@ const UI = (() => {
 
     const enheter = S.varselEnheter;
 
+    // Er alt i orden, skal ikke feilsøkingen stå og ta plass. Den hører
+    // hjemme når noe er galt, ikke som en fast del av siden.
+    const altVirker = st === "paa" && enheter !== null && enheter.length > 0 && (!iOS || paaHjem);
+
     return `
       ${topp}
 
@@ -2321,11 +2338,17 @@ const UI = (() => {
       </div>
 
       <div>
-        <div class="eyebrow" style="margin:20px 0 8px">Enkeltchatter</div>
+        <div class="eyebrow" style="margin:20px 0 8px">Chattene på turen</div>
         <div class="card pad" style="padding:0">
           <div class="memberlist">
             ${S.trip.channels.map(c => `<div class="person">
-              <span>${esc(c.name)}</span>
+              <span class="chatnavn">
+                <span class="chatikon">${c.private ? "&#128274;" : ICON.chat}</span>
+                <span>
+                  <b>${esc(c.name)}</b>
+                  <small>${c.private ? "Privat chat" : "Åpen chat"}</small>
+                </span>
+              </span>
               <select class="select minivalg" data-chatniva="${esc(c.id)}">
                 <option value="folg" ${!valg.chat[c.id] ? "selected" : ""}>Følg turen</option>
                 ${NIVAER.map(([v, tittel]) => `<option value="${v}"
@@ -2334,15 +2357,16 @@ const UI = (() => {
             </div>`).join("")}
           </div>
         </div>
-        <p class="muted" style="margin-top:7px">En chat som følger turen, endrer seg med valget over.</p>
+        <p class="muted" style="margin-top:7px">Dette er gruppechattene i turen. En chat som
+          følger turen, endrer seg med valget over.</p>
       </div>
 
-      <div>
+      ${altVirker ? "" : `<div>
         <div class="eyebrow" style="margin:20px 0 8px">Virker det?</div>
         <div class="card pad" style="padding-block:6px">
           ${linje("Nettleseren kan varsle", st !== "umulig", st === "umulig" ? "Ikke støttet her" : "Ja")}
           ${iOS ? linje("Ligger på hjemskjermen", paaHjem, paaHjem ? "Ja" : "Kreves på iPhone") : ""}
-          ${linje("Du har sagt ja", st === "paa" || st === "av" ? st === "paa" : false,
+          ${linje("Du har sagt ja", st === "paa",
                   st === "paa" ? "Ja" : st === "avslaatt" ? "Nei, blokkert" : "Ikke slått på")}
           ${linje("Enheten er lagret i basen",
                   enheter === null ? null : enheter.length > 0,
@@ -2358,7 +2382,7 @@ const UI = (() => {
         <p class="muted" style="margin-top:8px">
           Den første viser at telefonen kan vise varsler. Den andre går hele veien om serveren,
           og er den som avslører om noe mangler der. Du får aldri varsel om dine egne meldinger.</p>
-      </div>`;
+      </div>`}`;
   }
 
   function settOppVarsler() {

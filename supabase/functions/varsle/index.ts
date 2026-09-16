@@ -266,9 +266,9 @@ Deno.serve(async (req) => {
   const auth = req.headers.get("Authorization");
   if (!auth) return svar({ feil: "Ikke innlogget." }, 401);
 
-  let kropp: { messageId?: string; test?: boolean };
+  let kropp: { messageId?: string; test?: boolean; program?: { tripId: string; dato: string } };
   try { kropp = await req.json(); } catch { return svar({ feil: "Ugyldig forespørsel." }, 400); }
-  if (!kropp.messageId && !kropp.test) return svar({ feil: "Mangler melding." }, 400);
+  if (!kropp.messageId && !kropp.test && !kropp.program) return svar({ feil: "Mangler melding." }, 400);
   if (kropp.messageId && !uuid(kropp.messageId)) return svar({ feil: "Ugyldig melding." }, 400);
 
   const meg = await hvemErJeg(auth);
@@ -301,6 +301,66 @@ Deno.serve(async (req) => {
       utgaatt: res.doede.length, feil: res.feil[0] || null,
       ms: { database: t1 - t0, sending: t2 - t1 }
     });
+  }
+
+  /* Hvem sitter med appen framme akkurat nå? De skal ikke få pling —
+     de ser meldingen komme selv. Er de inne i chatten det gjelder, skal
+     de ikke merke noe i det hele tatt. */
+  async function tilstedevaerende(tripId: string) {
+    const grense = new Date(Date.now() - 90_000).toISOString();
+    const rader = await les<{ user_id: string; channel_id: string | null }>(
+      `tilstede?trip_id=eq.${tripId}&sett=gt.${grense}&select=user_id,channel_id`);
+    return new Map(rader.map(r => [r.user_id, r.channel_id]));
+  }
+
+  /* Endringer i programmet varsles bare den dagen de gjelder. At noe
+     flyttes i morgen, kan man lese seg til; at oppmøtet om en time er
+     flyttet, må man få vite. */
+  if (kropp.program) {
+    const { tripId, dato } = kropp.program;
+    if (!uuid(tripId)) return svar({ feil: "Ugyldig tur." }, 400);
+
+    const meg_rolle = await les<{ role: string }>(
+      `members?trip_id=eq.${tripId}&user_id=eq.${meg.id}&select=role&limit=1`);
+    if (!["leader", "admin"].includes(meg_rolle[0]?.role)) {
+      return svar({ feil: "Bare reiseledere kan gjøre dette." }, 403);
+    }
+
+    // «I dag» er i Norge, ikke der serveren tilfeldigvis står.
+    const iDag = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Oslo" });
+    if (dato !== iDag) return svar({ sendt: 0, grunn: "ikke_i_dag" });
+
+    const [medlemmer, turer2, tilstede] = await Promise.all([
+      les<{ user_id: string }>(`members?trip_id=eq.${tripId}&status=eq.approved&select=user_id`),
+      les<{ name: string }>(`trips?id=eq.${tripId}&select=name&limit=1`),
+      tilstedevaerende(tripId)
+    ]);
+
+    const valg2 = await les<{ user_id: string; channel_id: string | null; niva: string }>(
+      `varselvalg?trip_id=eq.${tripId}&channel_id=is.null&select=user_id,channel_id,niva`);
+
+    const skalHa2 = medlemmer
+      .map(m => m.user_id)
+      .filter(id => id !== meg.id)
+      .filter(id => !tilstede.has(id))                       // ser det selv
+      .filter(id => (valg2.find(v => v.user_id === id)?.niva ?? "viktig") !== "ingen");
+    if (!skalHa2.length) return svar({ sendt: 0 });
+
+    const enheter2 = await les<Enhet>(
+      `push_subs?user_id=in.(${skalHa2.join(",")})&select=endpoint,p256dh,auth`);
+    if (!enheter2.length) return svar({ sendt: 0 });
+
+    try { await vapidNokler(); }
+    catch (e) { console.error("varsel-oppsett:", e); return svar({ feil: "Varsler er ikke satt opp." }, 500); }
+
+    const res2 = await sendTil(enheter2, JSON.stringify({
+      t: turer2[0]?.name || "TourFlow",
+      b: "Programmet i dag er endret — se hva som gjelder nå.",
+      u: `?tur=${tripId}`,
+      tag: "program-" + tripId          // erstatter forrige endring samme dag
+    }));
+    await ryddDoede(res2.doede);
+    return svar({ sendt: res2.sendt });
   }
 
   type Melding = {
@@ -347,9 +407,12 @@ Deno.serve(async (req) => {
   const mottakere = rader.map(r => r.user_id).filter(id => id !== melding.author_id);
   if (!mottakere.length) return svar({ sendt: 0 });
 
-  const valg = await les<{ user_id: string; channel_id: string | null; niva: string }>(
-    `varselvalg?trip_id=eq.${melding.trip_id}` +
-    `&user_id=in.(${mottakere.join(",")})&select=user_id,channel_id,niva`);
+  const [valg, tilstede] = await Promise.all([
+    les<{ user_id: string; channel_id: string | null; niva: string }>(
+      `varselvalg?trip_id=eq.${melding.trip_id}` +
+      `&user_id=in.(${mottakere.join(",")})&select=user_id,channel_id,niva`),
+    tilstedevaerende(melding.trip_id)
+  ]);
 
   const niva = (bruker: string) => {
     const mine = valg.filter(v => v.user_id === bruker);
@@ -360,6 +423,9 @@ Deno.serve(async (req) => {
   };
 
   const skalHa = mottakere.filter(bruker => {
+    // Sitter du med appen framme, sier appen selv fra. Telefonen skal
+    // ikke pipe i tillegg — og i chatten det gjelder, ingenting.
+    if (tilstede.has(bruker)) return false;
     const n = niva(bruker);
     if (n === "ingen") return false;
     if (n === "alt") return true;

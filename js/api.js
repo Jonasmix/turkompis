@@ -247,7 +247,7 @@ const Api = (() => {
 
   /* ───────── meldinger ───────── */
   function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-  function fire() { listeners.forEach(f => { try { f(); } catch {} }); }
+  function fire(hendelse) { listeners.forEach(f => { try { f(hendelse); } catch {} }); }
 
   function messages(channelId) { return cache.messages[channelId] || []; }
 
@@ -430,7 +430,11 @@ const Api = (() => {
             cache.recent[m.channel_id] = {
               txt: m.txt, who: m.author_name, ts: m.created_at, mine: m.author_id === userId
             };
-            fire();
+            // Appen er framme, så telefonen får ikke noe varsel. Da må
+            // appen selv si fra — herfra, ikke fra push.
+            fire(m.author_id === userId ? null : {
+              nyMelding: { tur: m.trip_id, kanal: m.channel_id, hvem: m.author_name, txt: m.txt }
+            });
           })
       .on("postgres_changes",
           { event: "DELETE", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
@@ -583,6 +587,58 @@ const Api = (() => {
     fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
       method: "OPTIONS", headers: { "apikey": CONFIG.supabaseAnonKey }
     }).catch(() => {});
+  }
+
+  /* Serveren må vite om du sitter med appen framme, ellers kan den ikke
+     la være å sende varselet — og iPhone viser et varsel uansett hva
+     appen sier når det først har kommet fram. Raden er din egen; ingen
+     andre kan lese den. */
+  let herTimer = null;
+  let herNaa = { trip: null, chat: null };
+
+  function erHer(tripId, channelId) {
+    herNaa = { trip: tripId || null, chat: channelId || null };
+    if (!online() || !tripId) return;
+    sb.rpc("jeg_er_her", { p_trip: tripId, p_channel: channelId || null }).then(() => {}, () => {});
+
+    clearTimeout(herTimer);
+    // Serveren regner deg som borte etter halvannet minutt, så vi sier
+    // fra litt oftere enn det så lenge appen er framme.
+    herTimer = setTimeout(() => {
+      if (document.visibilityState === "visible" && herNaa.trip) erHer(herNaa.trip, herNaa.chat);
+    }, 45000);
+  }
+
+  function ikkeHer() {
+    clearTimeout(herTimer);
+    herTimer = null;
+    if (!online() || !herNaa.trip) return;
+    // Sett tidsstempelet tilbake, så serveren ser at du har gått.
+    sb.from("tilstede").delete().eq("user_id", userId).then(() => {}, () => {});
+  }
+
+  /* Endrer reiselederen programmet for i dag, skal folk få vite det.
+     Serveren avgjør om datoen er i dag — den har riktig klokke. */
+  let programVarselTimer = null;
+  function varsleOmProgram(tripId, dato) {
+    if (!dato) return;
+    clearTimeout(programVarselTimer);
+    // Drar man om på fem punkter, er det én endring, ikke fem varsler.
+    programVarselTimer = setTimeout(async () => {
+      try {
+        const { data } = await sb.auth.getSession();
+        if (!data.session) return;
+        await fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
+          method: "POST", keepalive: true,
+          headers: {
+            "Authorization": "Bearer " + data.session.access_token,
+            "apikey": CONFIG.supabaseAnonKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ program: { tripId, dato } })
+        });
+      } catch { /* programmet er endret uansett */ }
+    }, 12000);
   }
 
   const kanVarsle = () =>
@@ -813,10 +869,22 @@ const Api = (() => {
     const { error } = await sb.from(tabell).update({ [felt]: verdi }).eq("id", id);
     if (error) throw error;
   }
+  /* Hvilken dag hører denne endringen til? Trengs for å vite om den
+     angår i dag — det er bare da folk skal vekkes av den. */
+  const datoForDag = dayId => {
+    const d = cache.trip && cache.trip.days.find(x => x.id === dayId);
+    return d ? d.date : null;
+  };
+  const datoForPunkt = itemId => {
+    const d = cache.trip && cache.trip.days.find(x => x.items.some(i => i.id === itemId));
+    return d ? d.date : null;
+  };
+
   async function addDay(tripId, date) {
     const { data, error } = await sb.from("days")
       .insert({ trip_id: tripId, date }).select().single();
     if (error) throw error;
+    varsleOmProgram(tripId, date);
     return data.id;
   }
 
@@ -836,6 +904,7 @@ const Api = (() => {
       svar = await sb.from("items").insert(rad).select().single();
     }
     if (svar.error) throw svar.error;
+    varsleOmProgram(tripId, datoForDag(dayId));
     return svar.data.id;
   }
 
@@ -847,8 +916,10 @@ const Api = (() => {
     if ("placeId" in felter) rad.place_id = felter.placeId || null;
     if ("note" in felter) rad.note = felter.note || "";
     if ("sort" in felter) rad.sort = felter.sort;
+    const dato = datoForPunkt(id);
     const { error } = await sb.from("items").update(rad).eq("id", id);
     if (error) throw error;
+    if (cache.trip) varsleOmProgram(cache.trip.id, dato);
   }
 
   /* Gi eller ta lederrollen. Reglene ligger i basen, ikke her. */
@@ -871,8 +942,10 @@ const Api = (() => {
   }
 
   async function deleteItem(id) {
+    const dato = datoForPunkt(id);
     const { error } = await sb.from("items").delete().eq("id", id);
     if (error) throw error;
+    if (cache.trip) varsleOmProgram(cache.trip.id, dato);
   }
 
   async function deleteDay(id) {
@@ -1166,6 +1239,7 @@ const Api = (() => {
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal,
     varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel, varmVarsler,
+    erHer, ikkeHer,
     lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
     hentNavnFraTurer, loggUt
