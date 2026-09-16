@@ -14,7 +14,7 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<link rel="stylesheet" href="styles.css?v=69">
+<link rel="stylesheet" href="styles.css?v=70">
 </head>
 <body>
 
@@ -100,31 +100,37 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="js/config.js?v=69"></script>
-<script src="vendor/supabase.js?v=69"></script>
-<script src="js/templates.js?v=69"></script>
-<script src="js/api.js?v=69"></script>
-<script src="js/parse.js?v=69"></script>
-<script src="js/ui.js?v=69"></script>
+<script src="js/config.js?v=70"></script>
+<script src="vendor/supabase.js?v=70"></script>
+<script src="js/templates.js?v=70"></script>
+<script src="js/api.js?v=70"></script>
+<script src="js/parse.js?v=70"></script>
+<script src="js/ui.js?v=70"></script>
 <script>
 
 // Safari regner 100dvh litt feil, og da blir appen kortere enn skjermen —
 // det er den hvite stripa under fanelinja. Vi måler i stedet det
 // nettleseren faktisk viser, og setter høyden selv.
 (function appHoyde() {
+  let sist = 0;
   const sett = () => {
     const vv = window.visualViewport;
-    const h = vv ? vv.height + vv.offsetTop : window.innerHeight;
-    document.documentElement.style.setProperty("--app-h", Math.round(h) + "px");
+    const h = Math.round(vv ? vv.height : window.innerHeight);
+    // Små endringer er ikke verdt en ny utregning av hele layouten.
+    if (Math.abs(h - sist) < 2) return;
+    sist = h;
+    document.documentElement.style.setProperty("--app-h", h + "px");
   };
   sett();
   addEventListener("resize", sett);
   addEventListener("orientationchange", () => setTimeout(sett, 200));
   addEventListener("pageshow", sett);
-  if (window.visualViewport) {
-    visualViewport.addEventListener("resize", sett);
-    visualViewport.addEventListener("scroll", sett);
-  }
+
+  // Bare når høyden faktisk endrer seg — ikke når siden flytter seg.
+  // Med tastaturet oppe flytter iOS den visuelle utsnittet mens du blar,
+  // og målte vi på nytt for hver eneste flytting, kjempet layouten mot
+  // fingeren din og listen sto stille.
+  if (window.visualViewport) visualViewport.addEventListener("resize", sett);
 })();
 
 // Knip-zoom av: iOS respekterer ikke user-scalable aleine.

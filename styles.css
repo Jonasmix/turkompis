@@ -460,8 +460,9 @@ label.person span{flex:1;min-width:0}
   .linkbtn:hover{ text-decoration:underline }
   .chip:hover{ border-color:var(--ink-3) }
   .tripbtn:hover, .avatar:hover, .back:hover{ background:var(--surface-2) }
-  /* Med mus vil man kunne merke tekst — også i et ark. */
-  .sheet{ -webkit-user-select:text; user-select:text }
+  /* Med mus vil man kunne merke tekst — men bare på en skjerm med
+     mus, ikke på en telefon som svarer «pointer: fine» likevel. */
+  @media (min-width: 720px) { .sheet{ -webkit-user-select:text; user-select:text } }
   /* Sveip og hold finnes ikke med mus, så meldinger får en egen knapp. */
   .msgmeny{ opacity:0 }
   .msg:hover .msgmeny{ opacity:1 }
@@ -638,8 +639,17 @@ label.person span{flex:1;min-width:0}
 
 /* Tekst i ark skal ikke kunne markeres og dras rundt — bare i felt man
    faktisk skriver i. Uten dette starter iOS tekstmarkering midt i et drag. */
+/* Ingenting i et ark skal kunne dras rundt på skjermen. iOS lar deg
+   ellers plukke opp tekst og bilder og flytte dem — midt i et skjema er
+   det bare i veien, og det ser ut som om appen har gått i stykker. */
 .sheet{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.sheet *{-webkit-user-drag:none}
 .sheet input,.sheet textarea,.sheet select{-webkit-user-select:text;user-select:text}
+
+/* Det samme gjelder programlista når den er i redigeringsmodus: der er
+   det raden som skal flyttes, med håndtaket, og ingenting annet. */
+.tl,.tl *{-webkit-user-drag:none}
+.ev .title,.ev .place,.ev .time{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .sheet.dragging{transition:none !important}
 
 /* Beskjed om søppelpost på kodeskjermen */

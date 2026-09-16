@@ -483,7 +483,15 @@ const UI = (() => {
     const tl = $("screen").querySelector(".tl");
     if (!tl || !S.edit) return;
 
-    let rad = null, startY = 0;
+    let rad = null, startY = 0, ramme = null, hvile = null;
+
+    // Der raden ligger når den ikke er dratt noe sted. Måles på nytt hver
+    // gang den bytter plass, ellers regner vi grensene ut fra en posisjon
+    // den ikke har lenger.
+    const maal = () => {
+      ramme = tl.getBoundingClientRect();
+      hvile = rad.getBoundingClientRect();
+    };
 
     tl.addEventListener("pointerdown", e => {
       const hank = e.target.closest("[data-drag]");
@@ -492,6 +500,8 @@ const UI = (() => {
       if (!rad) return;
       e.preventDefault();
       startY = e.clientY;
+      rad.style.transform = "";
+      maal();
       rad.classList.add("drar");
       try { hank.setPointerCapture(e.pointerId); } catch {}
     });
@@ -499,13 +509,16 @@ const UI = (() => {
     tl.addEventListener("pointermove", e => {
       if (!rad) return;
       e.preventDefault();
-      const dy = e.clientY - startY;
+
+      // Raden flyttes i lista, ikke rundt på hele skjermen: den stopper
+      // ved første og siste punkt.
+      const dy = Math.max(ramme.top - hvile.top,
+                 Math.min(e.clientY - startY, ramme.bottom - hvile.bottom));
       rad.style.transform = `translateY(${dy}px)`;
 
       // Bare naboen i den retningen du drar vurderes, og først når raden
       // har passert midten av den. Ellers bytter raden plass med seg selv.
-      const rr = rad.getBoundingClientRect();
-      const midt = rr.top + rr.height / 2;
+      const midt = hvile.top + dy + hvile.height / 2;
       const nabo = dy > 0 ? rad.nextElementSibling : dy < 0 ? rad.previousElementSibling : null;
       if (!nabo || !nabo.classList.contains("ev")) return;
 
@@ -516,6 +529,7 @@ const UI = (() => {
       if (dy > 0) nabo.after(rad); else nabo.before(rad);
       startY = e.clientY;              // nytt utgangspunkt, ellers hopper raden
       rad.style.transform = "";
+      maal();
     }, { passive: false });
 
     async function slipp() {
@@ -692,6 +706,8 @@ const UI = (() => {
   /* Sveip en melding mot høyre for å svare, hold inne for å reagere.
      Begge gestene ligger på samme element, så en bevegelse avbryter
      holdet — ellers ville et sveip også åpnet emojivelgeren. */
+  let avbrytGest = null;         // stopper sveip og hold naar lista blar
+
   function settOppMeldingsgester() {
     const boks = $("screen").querySelector(".msgs");
     if (!boks) return;
@@ -743,6 +759,18 @@ const UI = (() => {
     }
     boks.addEventListener("pointerup", slipp);
     boks.addEventListener("pointercancel", slipp);
+
+    // Begynner lista å bla, er det ikke et hold lenger. Uten dette kunne
+    // emojivelgeren sprette opp midt i at du bladde bakover i samtalen.
+    // Selve lytteren ligger ett sted, utenfor — denne tegnes på nytt
+    // hver gang det kommer en melding.
+    avbrytGest = () => {
+      if (!rad) return;
+      avbrytHold();
+      rad.classList.remove("sveiper");
+      rad.style.transform = "";
+      rad = null;
+    };
   }
 
   /* Eldre meldinger legges foran i lista. Da vokser innholdet oppover, og
@@ -2916,6 +2944,7 @@ const UI = (() => {
 
   // Blar du deg selv ned til bunnen, er meldingene ikke nye lenger.
   $("screen").addEventListener("scroll", () => {
+    if (avbrytGest) avbrytGest();
     if (!S.nye || !S.openChat) return;
     const sc = $("screen");
     if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < 140) { S.nye = 0; render(); }
