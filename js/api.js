@@ -536,6 +536,20 @@ const Api = (() => {
     } catch { /* uten varsel er meldingen like fullt sendt */ }
   }
 
+  /* Serverfunksjoner sover mellom hver gang de brukes, og å våkne tar
+     sekunder. Åpner du en chat, vekker vi den med en tom forespørsel —
+     da er den i gang lenge før du er ferdig med å skrive. */
+  let sistVekket = 0;
+  function varmVarsler() {
+    if (!CONFIG.ready) return;
+    const naa = Date.now();
+    if (naa - sistVekket < 60000) return;      // én gang i minuttet holder
+    sistVekket = naa;
+    fetch(CONFIG.supabaseUrl + "/functions/v1/varsle", {
+      method: "OPTIONS", headers: { "apikey": CONFIG.supabaseAnonKey }
+    }).catch(() => {});
+  }
+
   const kanVarsle = () =>
     "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
@@ -1112,7 +1126,7 @@ const Api = (() => {
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     applyTemplate, lesProgramFraPdf, signOutLocal,
-    varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel,
+    varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel, varmVarsler,
     lastVarselvalg, varselvalg, varselNiva, settVarselNiva,
     lesInnlogging, erAnonym, minEpost, sendKode, bekreftKode, koblePaaEpost, bekreftKobling,
     hentNavnFraTurer, loggUt

@@ -987,8 +987,9 @@ const UI = (() => {
     Api.setLastChannel(S.trip.id, channelId);
     render();
     if (!fromHistory) history.pushState({ chat: channelId }, "");
-    // Reaksjoner strømmes bare for samtalen du faktisk ser på.
-    if (!S.offline) Api.subscribeChannel(channelId);
+    // Reaksjoner strømmes bare for samtalen du faktisk ser på. Samtidig
+    // vekkes varselfunksjonen, så den er klar når du har skrevet ferdig.
+    if (!S.offline) { Api.subscribeChannel(channelId); Api.varmVarsler(); }
     try { await Api.loadMessages(S.trip.id, channelId); }
     catch { toast("Klarte ikke hente meldingene."); }
     S.loadingChat = false;
