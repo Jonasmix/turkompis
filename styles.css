@@ -457,16 +457,6 @@ label.person span{flex:1;min-width:0}
   background:var(--amber);margin-left:7px;vertical-align:2px;
 }
 
-.fare summary{
-  list-style:none;cursor:pointer;padding:13px 2px;font-size:14px;color:var(--ink-3);
-  font-family:"Archivo",sans-serif;font-weight:600;text-align:center;
-}
-.fare summary::-webkit-details-marker{display:none}
-.fare summary::after{content:" ▾"}
-.fare[open] summary::after{content:" ▴"}
-.fare[open] summary{color:var(--ink-2)}
-.fare .stack{margin-top:4px}
-
 /* Feilsøkingslista på varselsiden: ett ledd i kjeden per rad, så det går
    an å se hvor det stopper i stedet for å gjette. */
 .sjekkrad{

@@ -931,14 +931,14 @@ const UI = (() => {
           nettleserdata mens du er gjest, er turene borte.</p>` : ""}
       </div>
 
-      <details class="fare">
-        <summary>Flere valg</summary>
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Flere valg</div>
         <div class="stack">
           <button class="btn danger" data-leave="${esc(trip.id)}">Meld deg av ${esc(trip.name)}</button>
           ${trip.erEier || trip.erAdmin ? `<button class="btn danger" data-deltrip="${esc(trip.id)}">Slett hele turen</button>` : ""}
           <button class="btn danger" id="resetBtn">Logg ut på denne enheten</button>
         </div>
-      </details>`;
+      </div>`;
   }
 
   /* ───────────────── tegning ───────────────── */
