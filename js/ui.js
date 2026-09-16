@@ -626,6 +626,7 @@ const UI = (() => {
             <span class="svartekst">${esc(svarPaa ? svarPaa.txt : "meldingen finnes ikke lenger")}</span>
           </button>` : ""}
         <div class="bubble">${esc(m.txt)}</div>
+        <button class="msgmeny" data-msgmeny="${esc(m.id)}" aria-label="Svar eller reager">⋯</button>
         ${rea.length ? `<div class="reaksjoner" data-rea="${esc(m.id)}">
             ${rea.map(r => `<button class="rea ${r.min ? "min" : ""}" data-emoji="${esc(r.emoji)}" data-pa="${esc(m.id)}">
               ${esc(r.emoji)}<span>${r.navn.length}</span></button>`).join("")}
@@ -655,6 +656,9 @@ const UI = (() => {
     const avbrytHold = () => { clearTimeout(holder); holder = null; };
 
     boks.addEventListener("pointerdown", e => {
+      // Med mus skal man kunne merke tekst; der finnes knappen på
+      // meldingen i stedet for sveip og hold.
+      if (e.pointerType === "mouse") return;
       if (e.target.closest("button, a")) return;
       rad = e.target.closest(".msg");
       if (!rad) return;
@@ -816,6 +820,43 @@ const UI = (() => {
      når det faktisk går an å gjøre noe med. */
   const varslerErAv = () => S.varselStatus === "av" || S.varselStatus === "avslaatt";
 
+  /* Appen hører hjemme på hjemskjermen: der får den hele skjermen, den
+     husker deg, og på iPhone er det eneste måten varsler i det hele tatt
+     virker. Hintet står til du legger den dit — eller sier du ikke vil. */
+  let installValg = null;                    // Chrome sin egen forespørsel
+  addEventListener("beforeinstallprompt", e => {
+    e.preventDefault();
+    installValg = e;
+    if (S.trip) render();
+  });
+  addEventListener("appinstalled", () => { installValg = null; render(); });
+
+  const paaHjemskjerm = () =>
+    matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+  function installkort() {
+    if (paaHjemskjerm()) return "";
+    try { if (localStorage.getItem("tk.skjulInstall")) return ""; } catch { /* uviktig */ }
+
+    const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const hvordan = installValg
+      ? `<button class="btn primary" style="margin-top:12px" id="installKnapp">Legg til appen</button>`
+      : iOS
+      ? `<p style="margin:9px 0 0;font-size:13.5px;color:var(--ink-2)">
+           Trykk delingsknappen nederst i Safari, og velg <b>Legg til på Hjem-skjerm</b>.</p>`
+      : `<p style="margin:9px 0 0;font-size:13.5px;color:var(--ink-2)">
+           I nettlesermenyen finner du <b>Installer</b> eller <b>Legg til på startsiden</b>.</p>`;
+
+    return `<div class="card pad" style="padding-block:15px;border-left:3px solid var(--blue)">
+      <b style="font-family:Archivo,sans-serif;font-size:14.5px">Legg TourFlow på hjemskjermen</b>
+      <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">
+        Da åpnes den som en app, husker deg${iOS ? ", og varsler begynner å virke — på iPhone
+        finnes de bare for apper på hjemskjermen" : " og kan gi deg varsler"}.</p>
+      ${hvordan}
+      <button class="linkbtn" style="margin-top:10px;font-size:13px" id="skjulInstall">Ikke nå</button>
+    </div>`;
+  }
+
   function viewMe() {
     const p = Api.getProfile();
     const trip = S.trip;
@@ -871,6 +912,8 @@ const UI = (() => {
         </div>`;
 
       })()}
+      ${installkort()}
+
       <div class="megkort">
         <span class="megava">${esc(p ? p.initials : "–")}</span>
         <span class="grow">
@@ -2040,6 +2083,9 @@ const UI = (() => {
           <label for="aPost">E-post</label>
           <input id="aPost" type="email" inputmode="email" autocomplete="email"
                  autocapitalize="none" spellcheck="false" placeholder="navn@eksempel.no">
+          <small style="display:block;margin-top:6px;font-size:12.5px;color:var(--ink-3)">
+            Bruk en privat adresse. Skolemailen til Tryggheim slipper ikke inn e-post utenfra,
+            så koden kommer aldri fram dit.</small>
         </div>
         <p class="err" id="aFeil" hidden></p>
         <button class="btn primary big" type="submit" id="aSend">
@@ -2089,7 +2135,9 @@ const UI = (() => {
       <h1>Sjekk e-posten</h1>
       <p class="lede">Vi sendte en kode til <b>${esc(epost)}</b>. Den er gyldig i en time.</p>
       <p class="soppelpost"><b>Finner du den ikke?</b> Se i søppelpost — automatiske e-poster
-        havner ofte der. I Gmail, sjekk også fanen «Kampanjer».</p>
+        havner ofte der. I Gmail, sjekk også fanen «Kampanjer».<br><br>
+        <b>Skolemailen virker ikke.</b> Tryggheim sperrer e-post utenfra, så koden kommer
+        aldri fram dit. Bruk en privat adresse — Gmail, iCloud, Outlook eller liknende.</p>
 
       <form id="kodeForm" novalidate>
         <div class="field">
@@ -2382,7 +2430,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2395,6 +2443,19 @@ const UI = (() => {
     if (t.id === "tripBtn") return sheetTrips();
     if (t.id === "meBtn") { S.tab = "meg"; return render(); }
     if (t.hasAttribute("data-edit")) { S.edit = !S.edit; return render(); }
+
+    if (t.id === "skjulInstall") {
+      try { localStorage.setItem("tk.skjulInstall", "1"); } catch { /* uviktig */ }
+      return render();
+    }
+
+    if (t.id === "installKnapp") {
+      if (!installValg) return toast("Bruk nettlesermenyen for å legge den til.");
+      installValg.prompt();
+      const valg = installValg; installValg = null;
+      valg.userChoice.finally(() => render());
+      return;
+    }
 
     if (t.id === "resetBtn") {
       const gjest = Api.erAnonym();
@@ -2486,6 +2547,7 @@ const UI = (() => {
     if (t.dataset.kartapne) return settKart(t.dataset.kartapne, "apen");
     if (t.dataset.kartlukk) return settKart(t.dataset.kartlukk, "liten");
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
+    if (t.dataset.msgmeny) return sheetEmoji(t.dataset.msgmeny);
     if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
     if (t.dataset.svar) { closeSheet(); return startSvar(t.dataset.svar); }
     if (t.dataset.item) return sheetItem(t.dataset.item);

@@ -435,6 +435,47 @@ label.person span{flex:1;min-width:0}
 }
 .eldreknapp:active{background:var(--surface-2)}
 
+/* ---------- på PC ----------
+   Appen er tegnet for en telefon, og skal fortsatt være det: en chat i
+   full skjermbredde blir uleselig. På en stor skjerm står den derfor som
+   et kort midt på siden, med noe rundt seg — ellers ser den ut som en
+   smal hvit stripe som har havnet der ved et uhell. */
+@media (min-width: 720px) {
+  body{ background:var(--ground); display:flex; align-items:center; justify-content:center; }
+  .app, .join{
+    height:min(100%, 900px); width:100%; max-width:560px;
+    border:1px solid var(--line); border-radius:20px; overflow:hidden;
+    box-shadow:0 18px 50px rgba(9,15,22,.13);
+  }
+  .join{ background:var(--surface); }
+  /* Ingen fanelinje å ta hensyn til nederst når det ikke er en telefon. */
+  .toast{ bottom:96px }
+}
+
+/* Pekeren skal få svar. På telefon finnes ikke hover, og da er alt dette
+   uten betydning — derfor bare der det faktisk er en mus. */
+@media (hover: hover) and (pointer: fine) {
+  .listrow:hover, .chatrow:hover, .person:hover, .ev:hover{ background:var(--surface-2) }
+  .btn:hover{ filter:brightness(.97) }
+  .linkbtn:hover{ text-decoration:underline }
+  .chip:hover{ border-color:var(--ink-3) }
+  .tripbtn:hover, .avatar:hover, .back:hover{ background:var(--surface-2) }
+  /* Med mus vil man kunne merke tekst — også i et ark. */
+  .sheet{ -webkit-user-select:text; user-select:text }
+  /* Sveip og hold finnes ikke med mus, så meldinger får en egen knapp. */
+  .msgmeny{ opacity:0 }
+  .msg:hover .msgmeny{ opacity:1 }
+}
+
+.msgmeny{
+  position:absolute;top:-6px;right:-30px;width:26px;height:26px;border-radius:50%;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-3);
+  cursor:pointer;font-size:13px;line-height:1;display:none;place-items:center;
+  transition:opacity .12s;
+}
+.msg.me .msgmeny{ right:auto; left:-30px }
+@media (hover: hover) and (pointer: fine) { .msgmeny{ display:grid } .msg{ position:relative } }
+
 /* ---------- Meg ---------- */
 /* Hvem du er, én gang øverst — resten av fana er lister med rader, ikke
    en stabel med knapper. Det som er farlig å trykke på, ligger sammen og
