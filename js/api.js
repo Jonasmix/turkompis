@@ -23,7 +23,8 @@ const Api = (() => {
     lastTrip: "tk.lastTrip",
     lastChannel: id => `tk.lastChannel.${id}`,
     snapshot: id => `tk.snapshot.${id}`,
-    vaer: id => `tk.vaer.${id}`
+    vaer: id => `tk.vaer.${id}`,
+    lest: id => `tk.lest.${id}`
   };
 
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } }
@@ -252,6 +253,40 @@ const Api = (() => {
 
   /* Siste melding i hver chat — det chatlista viser under navnet. */
   function lastByChannel() { return cache.recent || {}; }
+
+  /* ───────── uleste ─────────
+     Hva du har sett, er det bare denne telefonen som vet — og det holder.
+     Vi lagrer tidspunktet for den siste meldingen du hadde framme i hver
+     chat, og sammenlikner med den nyeste som finnes. Ingenting av dette
+     trenger å ligge i basen, og da slipper vi også at «lest» blir noe
+     andre kan se. */
+  const lest = {};
+
+  function lestKart(tripId) {
+    if (!lest[tripId]) lest[tripId] = lsGet(LS.lest(tripId), {});
+    return lest[tripId];
+  }
+
+  function settLest(tripId, channelId, ts) {
+    if (!tripId || !channelId || !ts) return;
+    const k = lestKart(tripId);
+    if (k[channelId] && k[channelId] >= ts) return;
+    k[channelId] = ts;
+    lsSet(LS.lest(tripId), k);
+  }
+
+  /* Egne meldinger teller aldri som uleste — du var jo der da du skrev. */
+  function erUlest(tripId, channelId) {
+    const siste = (cache.recent || {})[channelId];
+    if (!siste || siste.mine) return false;
+    const k = lestKart(tripId);
+    return !k[channelId] || siste.ts > k[channelId];
+  }
+
+  function antallUleste(tripId) {
+    if (!cache.trip || cache.trip.id !== tripId) return 0;
+    return cache.trip.channels.filter(c => erUlest(tripId, c.id)).length;
+  }
 
   async function loadRecent(tripId) {
     if (!online()) return lastByChannel();
@@ -1122,6 +1157,7 @@ const Api = (() => {
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
+    settLest, erUlest, antallUleste,
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
     sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,

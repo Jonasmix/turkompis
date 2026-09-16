@@ -5,7 +5,7 @@
    endrer noe, så får alle den nye versjonen: nye filadresser går utenom
    både service workeren og nettleserens eget mellomlager. */
 
-const BUILD = 55;
+const BUILD = 56;
 const CACHE = "tourflow-b" + BUILD;
 
 const SHELL = [
@@ -72,21 +72,37 @@ self.addEventListener("push", e => {
   })());
 });
 
-// Trykker du på varselet, skal du havne i riktig chat — i vinduet som
-// allerede er åpent hvis det finnes, ellers i et nytt.
+/* Trykker du på varselet, skal du havne i riktig chat.
+   Det skjer på tre måter samtidig, fordi telefonene gjør dette ulikt:
+   målet legges igjen et sted appen leser når den våkner, det sendes
+   direkte til vinduet hvis det finnes, og adressen brukes hvis appen må
+   startes. Én av dem treffer alltid. */
+const MAALCACHE = "tourflow-maal";
+
+async function leggIgjenMaal(maal) {
+  try {
+    const c = await caches.open(MAALCACHE);
+    await c.put("maal", new Response(maal));
+  } catch { /* uten mellomlager får de to andre veiene klare seg */ }
+}
+
 self.addEventListener("notificationclick", e => {
   e.notification.close();
   const maal = (e.notification.data && e.notification.data.url) || "./";
+
   e.waitUntil((async () => {
-    const vinduer = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const hjemme = new URL(self.registration.scope);
+    const adresse = new URL(maal, hjemme).href;
+
+    await leggIgjenMaal(maal);
+
+    const vinduer = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const v of vinduer) {
-      if (new URL(v.url).pathname.startsWith(hjemme.pathname)) {
-        v.postMessage({ aapne: maal });
-        return v.focus();
-      }
+      if (!new URL(v.url).pathname.startsWith(hjemme.pathname)) continue;
+      v.postMessage({ aapne: maal });
+      try { await v.focus(); return; } catch { /* prøv å åpne i stedet */ }
     }
-    return self.clients.openWindow(new URL(maal, hjemme).href);
+    return self.clients.openWindow(adresse);
   })());
 });
 

@@ -74,6 +74,21 @@ const UI = (() => {
     return maal;
   }
 
+  /* Service workeren legger igjen målet her når du trykker på et varsel.
+     Vinduet kan ha vært sovende, eller meldingen kan ha kommet fram før
+     appen var klar — da ligger målet her og venter i stedet for å gå tapt. */
+  async function ventendeMaal() {
+    if (!("caches" in window)) return null;
+    try {
+      const c = await caches.open("tourflow-maal");
+      const r = await c.match("maal");
+      if (!r) return null;
+      await c.delete("maal");
+      const t = (await r.text()).replace(/^[^?]*\??/, "");
+      return t ? lenkemaal(t) : null;
+    } catch { return null; }
+  }
+
   async function aapneFraVarsel(maal) {
     if (!maal.tur && !maal.chat) return false;
     try {
@@ -137,6 +152,9 @@ const UI = (() => {
     // Kom du hit fra et varsel, skal du havne i chatten varselet gjaldt.
     const maal = lenkemaal();
     if ((maal.tur || maal.chat) && await aapneFraVarsel(maal)) return;
+
+    const ventende = await ventendeMaal();
+    if (ventende && await aapneFraVarsel(ventende)) return;
 
     const profile = Api.getProfile(), last = Api.getLastTrip();
     if (profile && last) {
@@ -563,8 +581,9 @@ const UI = (() => {
     const recent = Api.lastByChannel();
     const rows = S.trip.channels.map(c => {
       const last = recent[c.id];
+      const ulest = Api.erUlest(S.trip.id, c.id);
       const initials = c.name.split(/\s+/).slice(0, 2).map(w => w[0] || "").join("").toUpperCase();
-      return `<button class="chatrow" data-openchat="${esc(c.id)}">
+      return `<button class="chatrow${ulest ? " ulest" : ""}" data-openchat="${esc(c.id)}">
         <span class="ava ${c.private ? "locked" : ""}">${c.private ? "&#128274;" : esc(initials)}</span>
         <span class="grow" style="min-width:0">
           <span class="nm">${esc(c.name)}</span>
@@ -572,7 +591,10 @@ const UI = (() => {
             ? `<em>${esc(last.mine ? "Du" : last.who.split(" ")[0])}:</em> ${esc(last.txt)}`
             : `<em>${esc(c.sub || "Ingen meldinger ennå")}</em>`}</span>
         </span>
-        <span class="when">${last ? esc(shortStamp(last.ts)) : ""}</span>
+        <span class="hoyre">
+          <span class="when">${last ? esc(shortStamp(last.ts)) : ""}</span>
+          ${ulest ? '<span class="ulestprikk" aria-label="Uleste meldinger"></span>' : ""}
+        </span>
       </button>`;
     }).join("");
 
@@ -923,10 +945,13 @@ const UI = (() => {
     // stedet for å dra deg ned. Eldre meldinger du selv har hentet, er
     // ikke nye — de legger seg foran, ikke bak.
     if (conv) {
-      const antall = Api.messages(conv.id).length;
+      const msgs = Api.messages(conv.id);
+      const antall = msgs.length;
       if (naerBunn) S.nye = 0;
       else if (!S.beholdSkroll && antall > S.sistAntall) S.nye += antall - S.sistAntall;
       S.sistAntall = antall;
+      // Har du samtalen framme, er den lest.
+      if (antall) Api.settLest(S.trip.id, conv.id, msgs[antall - 1].ts);
     }
 
     $("screen").innerHTML = side === "varsler" ? viewVarsler()
@@ -982,11 +1007,15 @@ const UI = (() => {
     // Fanerada er i veien når du skriver i en samtale.
     $("tabbar").hidden = Boolean(conv);
     const antall = oppgaver().length;
+    const uleste = Api.antallUleste(S.trip.id);
+    const merke = id =>
+      id === "meg" && antall ? `<span class="varsel">${antall}</span>`
+      : id === "chat" && uleste ? `<span class="varsel">${uleste}</span>` : "";
     $("tabbar").innerHTML = [
       ["program","Program",ICON.cal], ["chat","Chat",ICON.chat], ["meg","Meg",ICON.me]
     ].map(([id,label,ic]) =>
       `<button role="tab" aria-selected="${S.tab === id}" data-tab="${id}">
-        <span class="ikon">${ic}${id === "meg" && antall ? `<span class="varsel">${antall}</span>` : ""}</span>
+        <span class="ikon">${ic}${merke(id)}</span>
         <span>${label}</span></button>`
     ).join("");
   }
@@ -1038,6 +1067,10 @@ const UI = (() => {
     }
     clearTimeout(bakgrunnstimer); bakgrunnstimer = null;
     if (!S.trip || S.offline) return;
+
+    // Kom appen fram fordi du trykket på et varsel, ligger målet og venter.
+    const ventende = await ventendeMaal();
+    if (ventende && await aapneFraVarsel(ventende)) return;
 
     Api.subscribeTrip(S.trip.id);
     if (S.openChat) {

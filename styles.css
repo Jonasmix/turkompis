@@ -270,6 +270,15 @@ label.person span{flex:1;min-width:0}
 .chatrow .last em{font-style:normal;color:var(--ink-3)}
 .chatrow .when{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);align-self:flex-start;padding-top:3px}
 
+/* Uleste: navnet står tyngre, siste melding er ikke lenger grå, og det
+   ligger en prikk der klokkeslettet er. Nok til å se det i forbifarten,
+   uten at lista blir et juletre. */
+.chatrow .hoyre{display:flex;flex-direction:column;align-items:flex-end;gap:6px;align-self:flex-start}
+.chatrow.ulest .nm{font-weight:700}
+.chatrow.ulest .last{color:var(--ink);font-weight:600}
+.chatrow.ulest .when{color:var(--blue);font-weight:600}
+.ulestprikk{width:9px;height:9px;border-radius:50%;background:var(--blue);flex:none}
+
 /* ---------- samtaleoverskrift ---------- */
 .convhead{
   display:flex;align-items:center;gap:10px;flex:none;
