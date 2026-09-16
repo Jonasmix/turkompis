@@ -12,7 +12,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // Yr ber om at den som kaller oppgir hvem det er og hvordan de nås.
-const AGENT = "Turkompis/1.0 (https://github.com/Jonasmix/turkompis)";
+const AGENT = "TourFlow/1.0 (https://github.com/TourFlowUB/tourflow)";
 const FERSK_MIN = 60;          // hvor lenge en værmelding regnes som fersk
 const MAKS_OPPSLAG = 8;        // adresseoppslag per forespørsel
 
@@ -43,6 +43,37 @@ async function finnPunkt(sok: string): Promise<{ lat: number; lon: number } | nu
   } catch { return null; }
 }
 
+/* Én av dem som spør samtidig får hente; resten får det som ligger der.
+   Reservasjonen er selve raden: vi setter fetched_at fram, men bare hvis
+   den fortsatt står på den verdien vi leste. Taper vi kappløpet, rører vi
+   ingenting. Uten dette ville hundre telefoner på samme buss ha sendt
+   hundre like spørsmål til Yr i samme sekund. */
+async function reserver(
+  db: ReturnType<typeof createClient>, la: number, lo: number, forrige: string | null
+) {
+  if (forrige) {
+    const { data } = await db.from("forecasts")
+      .update({ fetched_at: new Date().toISOString() })
+      .eq("lat", la).eq("lon", lo).eq("fetched_at", forrige).select("lat");
+    return Boolean(data && data.length);
+  }
+  const { error } = await db.from("forecasts")
+    .insert({ lat: la, lon: lo, data: { timer: [] }, fetched_at: new Date().toISOString() });
+  return !error;                      // krasj med en annen = noen kom først
+}
+
+/* Gikk hentingen galt, slipper vi reservasjonen igjen. Ellers ville et
+   bomtur mot Yr ha låst stedet i en time. */
+async function frigi(
+  db: ReturnType<typeof createClient>, la: number, lo: number, forrige: string | null
+) {
+  if (forrige) {
+    await db.from("forecasts").update({ fetched_at: forrige }).eq("lat", la).eq("lon", lo);
+  } else {
+    await db.from("forecasts").delete().eq("lat", la).eq("lon", lo);
+  }
+}
+
 /* Koordinat → værmelding, med mellomlager i basen. */
 async function hentVaer(db: ReturnType<typeof createClient>, lat: number, lon: number) {
   const la = rund(lat), lo = rund(lon);
@@ -55,12 +86,18 @@ async function hentVaer(db: ReturnType<typeof createClient>, lat: number, lon: n
     if (alder < FERSK_MIN) return lagret.data;
   }
 
+  const forrige = lagret ? String(lagret.fetched_at) : null;
+  if (!await reserver(db, la, lo, forrige)) return lagret ? lagret.data : null;
+
   try {
     const r = await fetch(
       `https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${la}&lon=${lo}`,
       { headers: { "User-Agent": AGENT } }
     );
-    if (!r.ok) return lagret ? lagret.data : null;   // heller gammelt enn ingenting
+    if (!r.ok) {                                     // heller gammelt enn ingenting
+      await frigi(db, la, lo, forrige);
+      return lagret ? lagret.data : null;
+    }
     const full = await r.json();
 
     // Bare det vi bruker: ett punkt per time, symbol og temperatur.
@@ -81,6 +118,7 @@ async function hentVaer(db: ReturnType<typeof createClient>, lat: number, lon: n
     await db.from("forecasts").upsert({ lat: la, lon: lo, data: slank, fetched_at: new Date().toISOString() });
     return slank;
   } catch {
+    await frigi(db, la, lo, forrige);
     return lagret ? lagret.data : null;
   }
 }
@@ -113,13 +151,26 @@ Deno.serve(async (req) => {
   // hører til turen brukeren nettopp fikk lese.
   const tjener = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
+  // Adresse → koordinat slås bare opp av reiseledere. Nominatim tillater
+  // ett oppslag i sekundet for hele appen; med hundre deltakere som åpner
+  // appen på samme buss ville vi sendt hundre like oppslag og blitt stengt
+  // ute. Deltakerne får været for stedene som alt har koordinater, og det
+  // er reiselederen som ser «Må ordnes»-lista uansett.
+  let kanSlaaOpp = false;
+  const { data: meg } = await somBruker.auth.getUser();
+  if (meg?.user) {
+    const { data: rad } = await somBruker.from("members")
+      .select("role").eq("trip_id", tripId).eq("user_id", meg.user.id).maybeSingle();
+    kanSlaaOpp = rad?.role === "leader" || rad?.role === "admin";
+  }
+
   let oppslag = 0;
   const ut: Record<string, unknown> = {};
 
   for (const s of steder) {
     let lat = s.lat, lon = s.lon;
 
-    if ((lat == null || lon == null) && s.addr && oppslag < MAKS_OPPSLAG) {
+    if (kanSlaaOpp && (lat == null || lon == null) && s.addr && oppslag < MAKS_OPPSLAG) {
       oppslag++;
       if (oppslag > 1) await sov(1100);           // Nominatim: ett per sekund
       const punkt = await finnPunkt(`${s.name}, ${s.addr}`) || await finnPunkt(s.addr);

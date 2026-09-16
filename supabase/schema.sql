@@ -754,3 +754,25 @@ notify pgrst, 'reload schema';
 --      and u.email = 'din@epost.no';
 --
 -- Tilbake til vanlig deltaker: bytt 'admin' med 'member' i samme spørring.
+
+-- ═══════════════════════════════════════════════════════════════
+--  Utvidelse 10 — tåle at hele klassen er inne samtidig
+-- ═══════════════════════════════════════════════════════════════
+
+-- Uten disse leser basen gjennom hele tabellen hver gang noen åpner
+-- turen. Med én tur og ti meldinger merkes det ikke; med hundre elever
+-- som åpner appen samtidig på bussen gjør det det.
+create index if not exists places_trip_idx   on public.places   (trip_id);
+create index if not exists days_trip_idx     on public.days     (trip_id, date);
+create index if not exists items_trip_idx    on public.items    (trip_id);
+create index if not exists channels_trip_idx on public.channels (trip_id);
+create index if not exists messages_trip_idx on public.messages (trip_id, created_at desc);
+create index if not exists reactions_ch_idx  on public.reactions (channel_id);
+
+-- Reiseledere kunne slette medlemsrader rett i tabellen, utenom
+-- fjern_deltaker(). Da gjaldt ingen av vernene der: en leder kunne
+-- fjerne både den som laget turen og en admin. Sletting skal gå gjennom
+-- funksjonen, som sjekker hvem det er før den rører noe.
+drop policy if exists mem_kick on public.members;
+
+notify pgrst, 'reload schema';

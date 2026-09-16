@@ -11,6 +11,7 @@ const Api = (() => {
   let sb = null;                 // Supabase-klienten
   let userId = null;
   let liveSub = null;            // abonnement på nye meldinger
+  let liveTrip = null;           // hvilken tur abonnementet gjelder
   const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {} };
   const listeners = new Set();
 
@@ -18,7 +19,8 @@ const Api = (() => {
     profile: "tk.profile",
     lastTrip: "tk.lastTrip",
     lastChannel: id => `tk.lastChannel.${id}`,
-    snapshot: id => `tk.snapshot.${id}`
+    snapshot: id => `tk.snapshot.${id}`,
+    vaer: id => `tk.vaer.${id}`
   };
 
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } }
@@ -261,12 +263,16 @@ const Api = (() => {
 
   async function loadMessages(tripId, channelId) {
     if (!online()) return messages(channelId);
+    // De 300 SISTE meldingene, ikke de 300 første. Med «order(created_at)»
+    // og en grense hentet appen de eldste, så en chat med mye trafikk
+    // stoppet å vise nye meldinger etter at den passerte grensa.
     const [m, r] = await Promise.all([
-      sb.from("messages").select("*").eq("channel_id", channelId).order("created_at").limit(300),
+      sb.from("messages").select("*").eq("channel_id", channelId)
+        .order("created_at", { ascending: false }).limit(300),
       sb.from("reactions").select("*").eq("channel_id", channelId)
     ]);
     if (m.error) throw m.error;
-    cache.messages[channelId] = (m.data || []).map(shape);
+    cache.messages[channelId] = (m.data || []).reverse().map(shape);
     cache.reactions[channelId] = r.error ? [] : (r.data || []);
     return cache.messages[channelId];
   }
@@ -329,7 +335,12 @@ const Api = (() => {
      chatlista og den samtalen som står åpen. Radsikkerheten sørger for at
      vi bare får hendelser fra chatter vi har lov til å lese. */
   function subscribeTrip(tripId) {
+    // openTrip() kjøres på nytt etter hver endring. Bygde vi abonnementet
+    // opp igjen hver gang, ville meldinger som kom i det lille glippet
+    // aldri dukket opp hos den som redigerer.
+    if (liveSub && liveTrip === tripId) return;
     if (liveSub) { sb.removeChannel(liveSub); liveSub = null; }
+    liveTrip = tripId;
     liveSub = sb.channel("trip-" + tripId)
       .on("postgres_changes",
           { event: "INSERT", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
@@ -349,10 +360,16 @@ const Api = (() => {
       .on("postgres_changes",
           { event: "DELETE", schema: "public", table: "messages", filter: `trip_id=eq.${tripId}` },
           payload => {
-            const list = cache.messages[payload.old.channel_id];
-            if (!list) return;
-            const i = list.findIndex(m => m.id === payload.old.id);
-            if (i > -1) { list.splice(i, 1); fire(); }
+            // En slettehendelse inneholder bare nøkkelen — ikke hvilken chat
+            // meldingen lå i. Derfor leter vi i alle chattene vi har lastet.
+            const id = payload.old && payload.old.id;
+            if (!id) return;
+            let endret = false;
+            for (const list of Object.values(cache.messages)) {
+              const i = list.findIndex(m => m.id === id);
+              if (i > -1) { list.splice(i, 1); endret = true; }
+            }
+            if (endret) fire();
           })
       .on("postgres_changes",
           { event: "*", schema: "public", table: "reactions" },
@@ -360,12 +377,27 @@ const Api = (() => {
       .subscribe();
   }
 
-  /* Reaksjoner har ingen tur-kolonne aa filtrere paa, saa vi henter dem
-     paa nytt for den chatten som staar aapen og lar resten ligge. */
+  /* Reaksjoner endres i mellomlageret direkte, ikke ved å hente hele
+     chatten på nytt. Med hundre påloggede ville hvert eneste trykk ellers
+     ha utløst hundre nye spørringer mot basen — for én emoji.
+
+     En slettehendelse inneholder bare nøkkelen (melding + person), og det
+     er nok: raden fjernes der den ligger, uansett hvilken chat det er. */
   function nyttOmReaksjon(payload) {
-    const kanal = (payload.new && payload.new.channel_id) || (payload.old && payload.old.channel_id);
-    if (!kanal || !cache.reactions[kanal]) return;
-    lastReaksjoner(kanal).then(fire).catch(() => {});
+    const ny = payload.new && payload.new.message_id ? payload.new : null;
+    const gml = payload.old && payload.old.message_id ? payload.old : null;
+    const noekkel = ny || gml;
+    if (!noekkel) return;
+
+    let endret = false;
+    for (const [kanal, liste] of Object.entries(cache.reactions)) {
+      const i = liste.findIndex(r =>
+        r.message_id === noekkel.message_id && r.user_id === noekkel.user_id);
+      if (i > -1) { liste.splice(i, 1); endret = true; }
+      if (ny && ny.channel_id === kanal) { liste.push(ny); endret = true; }
+    }
+    // Reaksjon på en melding i en chat vi ikke har lastet: la den ligge.
+    if (endret) fire();
   }
 
   async function sendMessage(tripId, channelId, txt, action, replyTo) {
@@ -373,7 +405,9 @@ const Api = (() => {
     const row = {
       trip_id: tripId, channel_id: channelId,
       author_name: p ? p.name : "Ukjent",
-      role: isLeader() ? "Reiseleder" : "",
+      // En admin skriver som en vanlig deltaker. Sto det «Reiseleder» her,
+      // ville den skjulte rollen røpe seg i første melding.
+      role: isLeader() && !(cache.trip && cache.trip.erAdmin) ? "Reiseleder" : "",
       txt, action: action || null, reply_to: replyTo || null
     };
     let svar = await sb.from("messages").insert(row).select().single();
@@ -420,7 +454,12 @@ const Api = (() => {
       // Godkjenning er ikke lagt til i basen enda.
       const p = await sb.from("members").select("user_id, name, role").eq("trip_id", tripId).order("name");
       if (p.error) throw p.error;
-      return (p.data || []).map(m => ({ id: m.user_id, name: m.name, role: m.role, venter: false, me: m.user_id === userId }));
+      return (p.data || []).map(m => ({
+        id: m.user_id, name: m.name,
+        role: m.role === "admin" ? "member" : m.role,
+        skjult: m.role === "admin",
+        venter: false, me: m.user_id === userId
+      }));
     }
     if (error) throw error;
     return (data || []).map(m => ({
@@ -478,6 +517,7 @@ const Api = (() => {
     const { data, error } = await sb.from("places")
       .insert({ trip_id: tripId, name, addr: addr || "", kind: kind || "Sted", url: url || "" }).select().single();
     if (error) throw error;
+    cache.vaerUtdatert = true;      // nytt sted trenger et oppslag
     return data.id;
   }
 
@@ -544,6 +584,7 @@ const Api = (() => {
     if ("kind" in felter) rad.kind = felter.kind;
     const { error } = await sb.from("places").update(rad).eq("id", id);
     if (error) throw error;
+    if ("addr" in felter) cache.vaerUtdatert = true;   // ny adresse, nytt oppslag
   }
 
   async function deleteItem(id) {
@@ -624,8 +665,25 @@ const Api = (() => {
      ingenting — heller ingen værmelding enn feil værmelding. */
   function vaerFor(placeId) { return cache.vaer[placeId] || null; }
 
-  async function lastVaer(tripId) {
+  /* Værmeldingen hentes ikke på nytt hver gang appen tegner en tur.
+     openTrip() kjøres etter hver eneste endring, og med hundre deltakere
+     på samme tur ville det blitt hundrevis av kall til Yr i timen — både
+     unødvendig og i strid med det Yr og Nominatim ber om. Svaret ligger
+     derfor en halvtime, og hentes før det bare når et sted er endret. */
+  const VAER_FERSK_MIN = 30;
+
+  async function lastVaer(tripId, tving) {
     if (!online()) return;
+
+    const lagret = lsGet(LS.vaer(tripId), null);
+    if (lagret && lagret.vaer && !Object.keys(cache.vaer).length) {
+      cache.vaer = lagret.vaer;                     // vis noe med én gang
+      fire();
+    }
+    const alder = lagret && lagret.ts ? (Date.now() - lagret.ts) / 60000 : Infinity;
+    if (!tving && !cache.vaerUtdatert && alder < VAER_FERSK_MIN &&
+        lagret && lagret.vaer && Object.keys(lagret.vaer).length) return;
+
     try {
       const { data } = await sb.auth.getSession();
       if (!data.session) return;
@@ -641,6 +699,8 @@ const Api = (() => {
       if (!res.ok) return;
       const svar = await res.json();
       cache.vaer = svar.vaer || {};
+      cache.vaerUtdatert = false;
+      lsSet(LS.vaer(tripId), { ts: Date.now(), vaer: cache.vaer });
       fire();
     } catch { /* uten vær går appen like fint */ }
   }
@@ -681,6 +741,9 @@ const Api = (() => {
     if (u && u.id && u.id !== userId) {
       userId = u.id;
       cache.messages = {}; cache.reactions = {}; cache.recent = {}; cache.vaer = {}; cache.trip = null;
+      // Abonnementet hører til den forrige brukeren og må settes opp på nytt.
+      if (liveSub) { sb.removeChannel(liveSub); liveSub = null; }
+      liveTrip = null;
     }
     cache.epost = u && u.email ? u.email : null;
     cache.anonym = !!(u && u.is_anonymous);

@@ -2,7 +2,7 @@
 
 const UI = (() => {
 
-  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {} };
+  const S = { trip: null, tab: "program", day: null, openChat: null, loadingChat: false, trips: [], edit: false, offline: false, svarTil: null, kart: {}, sisteChat: null, tilBunn: false };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -25,6 +25,11 @@ const UI = (() => {
   function daysUntil(date) {
     return Math.round((new Date(date + "T12:00:00") - new Date(today() + "T12:00:00")) / 86400000);
   }
+  /* Nettadresser til steder kommer fra PDF-er vi ikke har skrevet selv.
+     Bare vanlige nettlenker slipper gjennom — «javascript:» og liknende
+     ville kjørt kode i appen hvis noen la det inn i et hefte. */
+  const trygLenke = u => /^https?:\/\//i.test(String(u || "").trim());
+
   const mapsGoogle = p => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.name + ", " + p.addr) + "&travelmode=transit";
   const mapsApple  = p => "https://maps.apple.com/?daddr=" + encodeURIComponent(p.name + ", " + p.addr) + "&dirflg=r";
 
@@ -819,6 +824,15 @@ const UI = (() => {
     const chipsFor = $("screen").querySelector(".chips");
     const chipsScroll = chipsFor ? chipsFor.scrollLeft : 0;
 
+    // Står du nederst i samtalen, følger du med videre. Leser du lenger
+    // oppe, skal ikke en melding fra noen andre rykke deg ned igjen — og
+    // med hundre på samme tur skjer det hele tiden.
+    const sk = $("screen");
+    const byttetChat = !conv || S.sisteChat !== conv.id;
+    const naerBunn = byttetChat || S.tilBunn ||
+      (sk.scrollHeight - sk.scrollTop - sk.clientHeight) < 140;
+    S.sisteChat = conv ? conv.id : null;
+
     $("screen").innerHTML = S.tab === "program" ? viewProgram()
                           : S.tab === "chat" ? viewChat()
                           : viewMe();
@@ -841,8 +855,9 @@ const UI = (() => {
       const avbryt = $("avbrytSvar");
       if (avbryt) avbryt.addEventListener("click", () => { S.svarTil = null; render(); });
       settOppMeldingsgester();
-      const sc = $("screen"); sc.scrollTop = sc.scrollHeight;
+      if (naerBunn) { const sc = $("screen"); sc.scrollTop = sc.scrollHeight; }
     } else slot.innerHTML = "";
+    S.tilBunn = false;
 
     settOppDraing();
     startKarttimere();
@@ -908,6 +923,7 @@ const UI = (() => {
     try {
       await Api.sendMessage(S.trip.id, S.openChat, txt, action, S.svarTil ? S.svarTil.id : null);
       S.svarTil = null;
+      S.tilBunn = true;          // din egen melding skal du alltid se
       render();
     } catch (err) {
       inp.value = txt;
@@ -1006,7 +1022,7 @@ const UI = (() => {
       <div class="eyebrow">${esc(p.kind)}</div>
       <h3>${esc(p.name)}</h3>
       <div class="addr">${esc(p.addr || "Ingen adresse lagt inn")}</div>
-      ${p.url ? `<div class="addr"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></div>` : ""}
+      ${trygLenke(p.url) ? `<div class="addr"><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></div>` : ""}
       ${p.addr ? `<div class="acts">
         <a class="btn primary" href="${mapsGoogle(p)}" target="_blank" rel="noopener">${ICON.nav} Google Maps</a>
         <a class="btn" href="${mapsApple(p)}" target="_blank" rel="noopener">${ICON.pin} Apple Maps</a>
