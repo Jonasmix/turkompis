@@ -2033,6 +2033,10 @@ const UI = (() => {
           lukkAuth();
           toast("Kontoen er sikret med " + epost);
         } else {
+          if (!(await gjestenGaarTapt())) {
+            knapp.disabled = false; knapp.textContent = "Logg inn";
+            return;
+          }
           await Api.bekreftKode(epost, kode);
           $("authScreen").hidden = true;
           await etterInnlogging();
@@ -2042,6 +2046,26 @@ const UI = (() => {
         feil.textContent = e2.message; feil.hidden = false;
       }
     });
+  }
+
+  /* Logger du inn som deg selv, blir gjestekontoen på telefonen slettet.
+     Har den ingen turer, merker du ingenting. Har den turer, skal du få
+     vite det før du mister dem — det finnes en annen vei, «Sikre kontoen
+     med e-post», som beholder alt. */
+  async function gjestenGaarTapt() {
+    if (!Api.erAnonym()) return true;
+    let turer = [];
+    try { turer = await Api.myTrips(); } catch { return true; }
+    if (!turer.length) return true;
+
+    const ledet = turer.filter(t => t.role === "leader").length;
+    return confirm(
+      `Som gjest er du med på ${turer.length} tur${turer.length === 1 ? "" : "er"}` +
+      (ledet ? `, og reiseleder for ${ledet} av dem` : "") + ".\n\n" +
+      "Logger du inn med e-post nå, slettes gjestekontoen, og turene følger ikke med — " +
+      "du må bli med på nytt med turkoden.\n\n" +
+      "Vil du beholde dem, avbryt her og bruk «Sikre kontoen med e-post» på Meg-fanen i stedet."
+    );
   }
 
   /* Tilbake dit man kom fra: appen om man er inne i en tur, ellers join. */
@@ -2298,8 +2322,15 @@ const UI = (() => {
     if (t.hasAttribute("data-edit")) { S.edit = !S.edit; return render(); }
 
     if (t.id === "resetBtn") {
-      if (confirm("Logge ut på denne enheten? Turene ligger igjen i basen, og du kommer inn igjen med turkoden.")) {
-        Api.signOutLocal(); location.reload();
+      const gjest = Api.erAnonym();
+      const sporsmaal = gjest
+        ? "Logge ut? Du er gjest, så kontoen finnes bare her — den slettes, og du kommer inn igjen med turkoden."
+        : "Logge ut på denne enheten? Turene ligger igjen i basen, og du logger inn igjen med e-posten din.";
+      if (confirm(sporsmaal)) {
+        // Vent: utloggingen rydder gjestekontoen, og det må rekke å skje
+        // før siden lastes på nytt.
+        await Api.signOutLocal();
+        location.reload();
       }
       return;
     }

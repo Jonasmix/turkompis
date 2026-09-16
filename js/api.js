@@ -991,12 +991,49 @@ const Api = (() => {
     if (error) throw epostFeil(error);
   }
 
+  /* Gjestekontoen er billetten vi sitter med akkurat nå. Tar vi vare på
+     den før vi logger inn som noen andre, kan vi be serveren rydde den
+     bort etterpå — og bare den, for det er billetten som er beviset. */
+  async function gjestebillett() {
+    const { data } = await sb.auth.getSession();
+    const s = data && data.session;
+    return s && s.user && s.user.is_anonymous
+      ? { token: s.access_token, id: s.user.id } : null;
+  }
+
+  async function ryddGjest(gjest) {
+    if (!gjest) return null;
+    try {
+      const { data } = await sb.auth.getSession();
+      const res = await fetch(CONFIG.supabaseUrl + "/functions/v1/ryddgjest", {
+        method: "POST",
+        keepalive: true,
+        headers: {
+          "Authorization": "Bearer " + (data.session ? data.session.access_token : CONFIG.supabaseAnonKey),
+          "apikey": CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ gjestToken: gjest.token })
+      });
+      const svar = await res.json().catch(() => null);
+      if (svar && !svar.slettet) console.warn("Gjestekontoen ble ikke slettet:", svar.grunn);
+      return svar;
+    } catch { return null; }
+  }
+
   async function bekreftKode(epost, kode) {
+    // Hentes før innloggingen: etterpå er vi en annen bruker.
+    const gjest = await gjestebillett();
+
     const { error } = await sb.auth.verifyOtp({
       email: epost.trim(), token: kode.trim(), type: "email"
     });
     if (error) throw epostFeil(error);
     await lesInnlogging();
+
+    // Logget du inn som deg selv på en telefon der du har vært gjest, er
+    // gjestekontoen ikke til å nå igjen for noen. Da skal den bort.
+    if (gjest && gjest.id !== userId) ryddGjest(gjest);
   }
 
   /* Koble e-post til kontoen du alt har, så du beholder turene dine. */
@@ -1049,11 +1086,16 @@ const Api = (() => {
     return data && data.length ? data[0].name : null;
   }
 
+  /* Logger en gjest ut, er kontoen borte for alltid — den bodde bare i
+     denne nettleseren. Da rydder vi den bort i stedet for å la den ligge
+     igjen som en konto uten eier. */
   async function loggUt() {
+    await ryddGjest(await gjestebillett());
     try { await sb.auth.signOut(); } catch {}
     Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
   }
-  function signOutLocal() {
+  async function signOutLocal() {
+    await ryddGjest(await gjestebillett());
     Object.keys(localStorage).filter(k => k.startsWith("tk.")).forEach(k => localStorage.removeItem(k));
     if (sb) sb.auth.signOut().catch(() => {});
   }
