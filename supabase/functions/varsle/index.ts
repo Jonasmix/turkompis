@@ -114,7 +114,17 @@ Deno.serve(async (req) => {
     }
     let tjener: webpush.ApplicationServer;
     try { tjener = await appServer(); }
-    catch (e) { return svar({ feil: e instanceof Error ? e.message : String(e) }, 500); }
+    catch (e) {
+      // Si hvilke navn som faktisk ligger der — da ser man med én gang om
+      // hemmeligheten heter noe litt annet enn funksjonen leter etter.
+      // Bare navnene, aldri verdiene.
+      let navn: string[] = [];
+      try { navn = Object.keys(Deno.env.toObject()).filter(k => /vapid/i.test(k)); } catch { /* låst env */ }
+      const hint = navn.length
+        ? ` Fant disse navnene under Secrets: ${navn.join(", ")}.`
+        : " Fant ingen hemmelighet med «vapid» i navnet.";
+      return svar({ feil: (e instanceof Error ? e.message : String(e)) + hint }, 500);
+    }
 
     const res = await sendTil(tjener, mine, JSON.stringify({
       t: "TourFlow", b: "Testvarsel — alt virker.", u: "", tag: "test"
