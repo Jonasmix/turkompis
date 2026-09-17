@@ -268,7 +268,10 @@ const Api = (() => {
           sort: (i.sort === undefined || i.sort === null) ? null : i.sort
         }))
       }, fmtDay(d.date))),
-      channels: channels.map(c => ({ id: c.id, name: c.name, sub: c.sub, private: c.private === true }))
+      channels: channels.map(c => ({
+        id: c.id, name: c.name, sub: c.sub, private: c.private === true,
+        min: c.created_by === userId          // du laget den, og kan slette den
+      }))
     };
   }
 
@@ -866,6 +869,20 @@ const Api = (() => {
     return c.id;
   }
 
+  /* Slett en chat med alt som står i den. Basen avgjør hvem som får:
+     den som laget chatten, eller en reiseleder når chatten er åpen. */
+  async function deleteChannel(channelId) {
+    const { error } = await sb.from("channels").delete().eq("id", channelId);
+    if (error) throw friendly(error);
+
+    const { data } = await sb.from("channels").select("id").eq("id", channelId).maybeSingle();
+    if (data) throw Object.assign(new Error("Du kan ikke slette denne chatten."), { kjent: true });
+
+    if (cache.trip) cache.trip.channels = cache.trip.channels.filter(c => c.id !== channelId);
+    delete cache.messages[channelId];
+    delete cache.recent[channelId];
+  }
+
   /* Hvem er med på turen — grunnlaget for å plukke deltakere til en chat. */
   async function tripMembers(tripId) {
     const { data, error } = await sb.from("members")
@@ -1355,7 +1372,7 @@ const Api = (() => {
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
     sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
-    addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
+    addChannel, deleteChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
     lastPaameldinger, paameldte, meldPaa, meldAv,

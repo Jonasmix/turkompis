@@ -1555,20 +1555,28 @@ const UI = (() => {
         // Chatten lages først når noen faktisk vil ha den, og bare én
         // gang — skrur man av og på igjen, skal den gamle brukes.
         let chatId = it.paaChat || null;
+        let nyChat = null;
         if (vilChat && !chatId) {
-          chatId = await Api.addChannel(
+          chatId = nyChat = await Api.addChannel(
             S.trip.id, ($("eTittel").value.trim() || it.title).slice(0, 60), "Påmeldte", true, []);
         }
 
-        await Api.updateItem(it.id, {
-          t: $("eTid").value,
-          title: $("eTittel").value.trim() || it.title,
-          placeId,
-          note: $("eNotat").value.trim(),
-          paamelding: paaPaa,
-          plasser: paaPaa ? $("ePlasser").value : null,
-          paaChat: vilChat ? chatId : null
-        });
+        try {
+          await Api.updateItem(it.id, {
+            t: $("eTid").value,
+            title: $("eTittel").value.trim() || it.title,
+            placeId,
+            note: $("eNotat").value.trim(),
+            paamelding: paaPaa,
+            plasser: paaPaa ? $("ePlasser").value : null,
+            paaChat: vilChat ? chatId : null
+          });
+        } catch (e3) {
+          // Rakk vi å lage chatten før lagringen feilet, skal den ikke bli
+          // stående igjen — ellers får man en ny for hvert forsøk.
+          if (nyChat) await Api.deleteChannel(nyChat).catch(() => {});
+          throw e3;
+        }
         closeSheet();
         await openTrip(S.trip.id);
         toast("Punktet er oppdatert.");
@@ -2487,9 +2495,11 @@ const UI = (() => {
         </div>`).join("")}</div>
       </div>` : ""}
 
-      ${ch.private ? `<div class="stack">
-        <button class="btn danger" data-cmleave="${esc(ch.id)}">Gå ut av chatten</button>
-      </div>` : ""}`;
+      <div class="stack">
+        ${ch.private ? `<button class="btn danger" data-cmleave="${esc(ch.id)}">Gå ut av chatten</button>` : ""}
+        ${ch.min || (!ch.private && S.trip.role === "leader")
+          ? `<button class="btn danger" data-slettchat="${esc(ch.id)}">Slett chatten</button>` : ""}
+      </div>`;
   }
 
   function viewVarsler() {
@@ -2849,7 +2859,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2978,6 +2988,19 @@ const UI = (() => {
         await openTrip(S.trip.id);
         return aapneDeltakere(true);
       } catch (e) { return toast(e.message || "Klarte ikke endre."); }
+    }
+
+    if (t.dataset.slettchat) {
+      const c = S.trip.channels.find(x => x.id === t.dataset.slettchat);
+      if (!confirm(`Slette «${c ? c.name : "chatten"}» for alle? Meldingene forsvinner for godt.`)) return;
+      try {
+        await Api.deleteChannel(t.dataset.slettchat);
+        S.side = null; S.openChat = null;
+        await openTrip(S.trip.id);
+        S.tab = "chat"; render();
+        toast("Chatten er slettet.");
+      } catch (e) { toast(e.message || "Klarte ikke slette chatten."); }
+      return;
     }
 
     if (t.dataset.paa) {
