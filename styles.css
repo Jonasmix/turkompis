@@ -142,6 +142,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 .bubble{background:var(--surface-2);border-radius:15px 15px 15px 5px;padding:10px 13px;font-size:15px;overflow-wrap:anywhere}
 .msg.me{align-self:flex-end;align-items:flex-end}
 .msg.me .bubble{background:var(--blue);color:var(--on-blue);border-radius:15px 15px 5px 15px}
+/* En lenke i en melding skal se ut som en lenke, også i din egen boble
+   der bakgrunnen er blå. */
+.bubble a{color:var(--blue-ink);text-decoration:underline;text-underline-offset:2px}
+.msg.me .bubble a{color:#fff}
 .stamp{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);padding:0 4px}
 
 .aicard{margin-top:8px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:12px;

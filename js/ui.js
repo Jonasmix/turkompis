@@ -34,6 +34,20 @@ const UI = (() => {
      ville kjørt kode i appen hvis noen la det inn i et hefte. */
   const trygLenke = u => /^https?:\/\//i.test(String(u || "").trim());
 
+  /* Skriver noen en lenke i chatten, skal den gå an å trykke på. Teksten
+     escapes først og gjøres om til lenker etterpå — aldri omvendt, ellers
+     kunne en melding smugle inn egen HTML. Bare http og https blir lenker;
+     «javascript:» og liknende forblir tekst. */
+  function medLenker(tekst) {
+    return esc(tekst).replace(/(https?:\/\/|www\.)[^\s<]+/gi, treff => {
+      // Punktum og parentes til slutt hører til setningen, ikke til lenken.
+      const hale = treff.match(/[.,!?;:)\]]+$/);
+      const selve = hale ? treff.slice(0, -hale[0].length) : treff;
+      const url = (selve.startsWith("www.") ? "https://" + selve : selve).replace(/&amp;/g, "&");
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${selve}</a>${hale ? hale[0] : ""}`;
+    });
+  }
+
   const mapsGoogle = p => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.name + ", " + p.addr) + "&travelmode=transit";
   const mapsApple  = p => "https://maps.apple.com/?daddr=" + encodeURIComponent(p.name + ", " + p.addr) + "&dirflg=r";
 
@@ -695,7 +709,7 @@ const UI = (() => {
             <span class="svarnavn">${esc(svarPaa ? (svarPaa.mine ? "Deg" : svarPaa.who) : "Slettet melding")}</span>
             <span class="svartekst">${esc(svarPaa ? svarPaa.txt : "meldingen finnes ikke lenger")}</span>
           </button>` : ""}
-        <div class="bubble">${esc(m.txt)}</div>
+        <div class="bubble">${medLenker(m.txt)}</div>
         <button class="msgmeny" data-msgmeny="${esc(m.id)}" aria-label="Svar eller reager">⋯</button>
         ${rea.length ? `<div class="reaksjoner" data-rea="${esc(m.id)}">
             ${rea.map(r => `<button class="rea ${r.min ? "min" : ""}" data-emoji="${esc(r.emoji)}" data-pa="${esc(m.id)}">
