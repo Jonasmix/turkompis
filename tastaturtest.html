@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tastaturtest</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+  :root{ --h:100dvh; color-scheme:light }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font:16px/1.45 -apple-system,system-ui,sans-serif;color:#111A26;background:#fff;
+    position:fixed;top:0;left:0;width:100%;height:var(--h);overflow:hidden;
+  }
+  .ramme{display:flex;flex-direction:column;height:100%}
+  .topp{padding:calc(12px + env(safe-area-inset-top,0px)) 16px 12px;border-bottom:1px solid #E6EBF0}
+  h1{font-size:19px;margin:0 0 4px}
+  p{margin:0;font-size:13.5px;color:#44566B}
+  .tall{flex:1;overflow:auto;padding:14px 16px;font:13px/1.6 ui-monospace,monospace;color:#44566B}
+  .tall b{color:#111A26}
+  .bunn{flex:none;border-top:1px solid #E6EBF0;padding:10px 14px;display:flex;gap:9px;align-items:flex-end;background:#fff}
+  .felt{
+    flex:1;min-width:0;border:1px solid #D3DBE3;background:#F3F6F8;border-radius:22px;
+    padding:12px 15px;font-size:16px;min-height:46px;
+  }
+  .felt[contenteditable]{max-height:120px;overflow-y:auto;-webkit-user-select:text;user-select:text}
+  .felt[contenteditable]:empty::before{content:attr(data-plass);color:#7C8EA0}
+  .knapp{
+    width:46px;height:46px;flex:none;border:0;border-radius:50%;background:#14508C;color:#fff;
+    font-size:18px;cursor:pointer
+  }
+  /* Streken viser nøyaktig hvor appen slutter: alt under den tegnes av iOS. */
+  .strek{position:fixed;left:0;right:0;height:3px;background:#A33325;z-index:5}
+  .merke{position:fixed;right:8px;font-size:11px;color:#A33325;background:#fff;padding:1px 5px;border-radius:5px;z-index:5}
+  .valg{display:grid;gap:10px;padding:16px}
+  .valg a{
+    display:block;border:1px solid #D3DBE3;border-radius:12px;padding:14px;text-decoration:none;color:#111A26;
+    font-weight:600
+  }
+  .valg small{display:block;font-weight:400;color:#44566B;margin-top:3px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="strek" id="strek" hidden></div>
+<div class="merke" id="merke" hidden>her slutter appen</div>
+
+<script>
+const m = new URLSearchParams(location.search).get("m");
+
+const felt = {
+  form: `<form class="bunn" onsubmit="return false">
+      <input class="felt" placeholder="Vanlig felt i skjema…" enterkeyhint="send">
+      <button class="knapp" type="submit">&#8593;</button>
+    </form>`,
+  input: `<div class="bunn"><input class="felt" placeholder="Bare ett felt, ingen skjema, ingen knapp…"></div>`,
+  ce: `<div class="bunn"><div class="felt" contenteditable="true" data-plass="Contenteditable, alene…"></div></div>`,
+  ce2: `<div class="bunn">
+      <div class="felt" contenteditable="true" data-plass="Contenteditable med knapp…"></div>
+      <button class="knapp" type="button">&#8593;</button>
+    </div>`
+};
+
+const navn = {
+  form: "1 · Vanlig felt i skjema (slik appen er i dag)",
+  input: "2 · Ett enkelt felt, uten skjema og uten knapp",
+  ce: "3 · Contenteditable, helt alene på siden",
+  ce2: "4 · Contenteditable med sendeknapp"
+};
+
+if (!felt[m]) {
+  document.getElementById("app").innerHTML = `
+    <div class="topp"><h1>Tastaturtest</h1>
+      <p>Åpne én og én. Trykk i feltet, og se om den grå linja med flueben kommer opp over tastaturet.
+      Den røde streken viser hvor siden slutter — alt under den tegnes av iOS.</p></div>
+    <div class="valg">
+      ${Object.keys(felt).map(k => `<a href="?m=${k}">${navn[k]}<small>${
+        k === "form" ? "Referanse. Her vet vi at linja kommer." :
+        k === "input" ? "Ingenting annet å trykke på — ingen piler å bruke." :
+        k === "ce" ? "Ikke et skjemafelt i det hele tatt." :
+        "Slik en ny skrivelinje ville sett ut."}</small></a>`).join("")}
+    </div>`;
+} else {
+  document.getElementById("app").innerHTML = `
+    <div class="ramme">
+      <div class="topp"><h1>${navn[m]}</h1>
+        <p><a href="?">&#8249; tilbake til lista</a></p></div>
+      <div class="tall" id="tall"></div>
+      ${felt[m]}
+    </div>`;
+
+  const tall = document.getElementById("tall");
+  const strek = document.getElementById("strek");
+  const merke = document.getElementById("merke");
+
+  const oppdater = () => {
+    const vv = window.visualViewport;
+    const full = window.innerHeight;
+    const h = vv ? Math.round(vv.height) : full;
+    const apent = vv && vv.height < full - 120;
+    document.documentElement.style.setProperty("--h", (apent ? h : full) + "px");
+
+    // Streken legges der siden slutter. Er det hvitt under den, er det
+    // hvite ikke vårt — da er det iOS som tegner det.
+    const bunn = apent ? h : full;
+    strek.hidden = false; merke.hidden = false;
+    strek.style.top = (bunn - 3) + "px";
+    merke.style.top = (bunn - 20) + "px";
+
+    tall.innerHTML = `
+      <b>window.innerHeight</b> ${full}<br>
+      <b>visualViewport.height</b> ${vv ? Math.round(vv.height) : "—"}<br>
+      <b>visualViewport.offsetTop</b> ${vv ? Math.round(vv.offsetTop) : "—"}<br>
+      <b>tastatur oppe</b> ${apent ? "ja" : "nei"}<br>
+      <b>skjult nederst</b> ${full - h} px<br><br>
+      Kommer den grå pilla med flueben opp når du trykker i feltet?<br>
+      Og: er det hvitt mellom den røde streken og pilla?`;
+  };
+
+  oppdater();
+  addEventListener("resize", oppdater);
+  if (window.visualViewport) {
+    visualViewport.addEventListener("resize", oppdater);
+    visualViewport.addEventListener("scroll", oppdater);
+  }
+}
+</script>
+</body>
+</html>
