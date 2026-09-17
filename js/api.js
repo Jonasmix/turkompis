@@ -251,6 +251,7 @@ const Api = (() => {
     return {
       id: trip.id, code: trip.code, name: trip.name, org: trip.org,
       krevGodkjenning: trip.require_approval === true,
+      bilder: trip.bilder !== false,
       venter: member ? member.status === "pending" : false,
       dates: days.length ? datoSpenn(days[0].date, days[days.length - 1].date) : "",
       // "admin" er skjult: den gir samme rettigheter som reiseleder, men
@@ -388,7 +389,7 @@ const Api = (() => {
   const shape = m => ({
     id: m.id, who: m.author_name, role: m.role, txt: m.txt,
     ts: m.created_at, action: m.action || null, mine: m.author_id === userId,
-    replyTo: m.reply_to || null
+    replyTo: m.reply_to || null, bilde: m.bilde || null
   });
 
   /* ───────── reaksjoner ───────── */
@@ -562,10 +563,10 @@ const Api = (() => {
     if (endret) fire();
   }
 
-  async function sendMessage(tripId, channelId, txt, action, replyTo) {
+  async function sendMessage(tripId, channelId, txt, action, replyTo, bilde) {
     const p = getProfile();
     const row = {
-      trip_id: tripId, channel_id: channelId,
+      trip_id: tripId, channel_id: channelId, bilde: bilde || null,
       author_name: p ? p.name : "Ukjent",
       // En admin skriver som en vanlig deltaker. Sto det «Reiseleder» her,
       // ville den skjulte rollen røpe seg i første melding.
@@ -577,6 +578,11 @@ const Api = (() => {
     if (svar.error && /reply_to/.test(svar.error.message || "")) {
       const { reply_to, ...utenSvar } = row;
       svar = await sb.from("messages").insert(utenSvar).select().single();
+    }
+    // Er ikke bildekolonnen lagt til enda, send teksten uten den.
+    if (svar.error && /bilde/.test(svar.error.message || "")) {
+      const { bilde: _, ...utenBilde } = row;
+      svar = await sb.from("messages").insert(utenBilde).select().single();
     }
     if (svar.error) throw friendly(svar.error);
     const data = svar.data;
@@ -794,6 +800,118 @@ const Api = (() => {
       if (niva === "folg") delete v.chat[channelId]; else v.chat[channelId] = niva;
     } else v.tur = niva === "folg" ? "viktig" : niva;
     cache.varsel = v;
+  }
+
+  /* ───────── bilder ─────────
+     Et mobilbilde er tre–fem megabyte. Sendt rått ville hundre elever
+     fylt lagringen på en tur, og bildene ville tatt evigheter å laste på
+     utenlandsk mobilnett. Vi krymper til noe som ser likt ut i en chat. */
+  const MAKS_KANT = 1280;
+
+  function krymp(fil) {
+    return new Promise((ok, feil) => {
+      const url = URL.createObjectURL(fil);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const skala = Math.min(1, MAKS_KANT / Math.max(img.width, img.height));
+        const b = Math.round(img.width * skala), h = Math.round(img.height * skala);
+
+        const lerret = document.createElement("canvas");
+        lerret.width = b; lerret.height = h;
+        lerret.getContext("2d").drawImage(img, 0, 0, b, h);
+        lerret.toBlob(
+          blob => blob ? ok(blob) : feil(new Error("Klarte ikke lese bildet.")),
+          "image/jpeg", 0.72
+        );
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); feil(new Error("Klarte ikke lese bildet.")); };
+      img.src = url;
+    });
+  }
+
+  /* Stien forteller hvor bildet hører hjemme, og det er den reglene i
+     basen leser: <tur>/<chat>/<fil>. */
+  async function lastOppBilde(tripId, channelId, fil) {
+    if (!/^image\//.test(fil.type)) throw Object.assign(new Error("Velg et bilde."), { kjent: true });
+    const blob = await krymp(fil);
+    const navn = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const sti = `${tripId}/${channelId}/${navn}`;
+
+    const { error } = await sb.storage.from("bilder")
+      .upload(sti, blob, { contentType: "image/jpeg", upsert: false });
+    if (error) {
+      if (/row-level security|violates/i.test(error.message || "")) {
+        throw Object.assign(new Error("Bilder er slått av for denne turen."), { kjent: true });
+      }
+      throw friendly(error);
+    }
+    return sti;
+  }
+
+  /* Lageret er lukket, så hvert bilde trenger en signert adresse. De
+     varer en time og hentes for mange om gangen — ett kall per bilde i en
+     lang samtale ville blitt hundre kall. */
+  const bildeUrler = new Map();
+
+  async function bildeUrl(stier) {
+    const mangler = stier.filter(s => s && !bildeUrler.has(s));
+    if (mangler.length) {
+      const { data } = await sb.storage.from("bilder").createSignedUrls(mangler, 3600);
+      for (const r of (data || [])) {
+        if (r.signedUrl) bildeUrler.set(r.path, r.signedUrl);
+      }
+      if (data) fire();
+    }
+    return bildeUrler;
+  }
+
+  const bildeAdresse = sti => bildeUrler.get(sti) || null;
+
+  /* Filen slettes fra lageret, og meldingen slutter å peke på den. Var det
+     et bilde uten tekst, forsvinner hele meldingen — en tom boble er ingen
+     å ha. Begge deler gjøres på serveren, slik at det skjer for alle. */
+  async function slettBilde(sti) {
+    const { error } = await sb.storage.from("bilder").remove([sti]);
+    if (error) throw friendly(error);
+    bildeUrler.delete(sti);
+    await sb.rpc("fjern_bilde", { p_sti: sti });
+    for (const liste of Object.values(cache.messages)) {
+      for (let i = liste.length - 1; i >= 0; i--) {
+        if (liste[i].bilde !== sti) continue;
+        if (liste[i].txt) liste[i].bilde = null;
+        else liste.splice(i, 1);
+      }
+    }
+  }
+
+  /* Bilder fra en klassetur er personopplysninger om mindreårige, og skal
+     ikke bli liggende i årevis fordi ingen husket å rydde. Serveren
+     sletter dem tretti dager etter siste programdag; appen minner den på
+     det én gang i døgnet. */
+  async function ryddGamleBilder() {
+    const sist = lsGet("tk.ryddet", 0);
+    if (Date.now() - sist < 86400000) return;
+    lsSet("tk.ryddet", Date.now());
+    try {
+      const { data } = await sb.auth.getSession();
+      if (!data.session) return;
+      await fetch(CONFIG.supabaseUrl + "/functions/v1/rydd", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + data.session.access_token,
+          "apikey": CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        },
+        body: "{}"
+      });
+    } catch { /* ryddes neste gang */ }
+  }
+
+  async function setBilderPaa(tripId, paa) {
+    const { error } = await sb.from("trips").update({ bilder: !!paa }).eq("id", tripId);
+    if (error) throw friendly(error);
+    if (cache.trip && cache.trip.id === tripId) cache.trip.bilder = !!paa;
   }
 
   async function deleteMessage(id, channelId) {
@@ -1372,6 +1490,7 @@ const Api = (() => {
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
     sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
+    lastOppBilde, bildeUrl, bildeAdresse, slettBilde, ryddGamleBilder, setBilderPaa,
     addChannel, deleteChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,

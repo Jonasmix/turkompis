@@ -66,6 +66,7 @@ const UI = (() => {
     chat:'<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3 1.2-4.4A8 8 0 1 1 21 12Z"/></svg>',
     prog:'<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/><circle cx="14" cy="18" r="2"/></svg>',
     me:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
+    bilde:'<svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="14" rx="2.5"/><circle cx="12" cy="12.5" r="3.4"/><path d="M8 5.5 9.2 3h5.6l1.2 2.5"/></svg>',
     send:'<svg viewBox="0 0 24 24"><path d="M4 12 20 4l-7 16-2-7-7-1Z"/></svg>',
     chevL:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="m15 6-6 6 6 6"/></svg>',
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
@@ -334,6 +335,7 @@ const UI = (() => {
       Api.erHer(tripId, null);
       if (trip.role === "leader") {
         Api.antallVentende(tripId).then(n => { if (n !== S.ventende) { S.ventende = n; render(); } });
+        Api.ryddGamleBilder();
       } else S.ventende = 0;
       // Statusen trengs på Meg-fanen, ikke bare inne på varselsiden.
       Api.varselStatus().then(s => { if (s !== S.varselStatus) { S.varselStatus = s; render(); } });
@@ -694,6 +696,11 @@ const UI = (() => {
 
   function viewConversation() {
     const msgs = Api.messages(S.openChat);
+
+    // Adressene til bildene varer en time og hentes for mange om gangen.
+    // Når de er klare, tegnes samtalen på nytt av seg selv.
+    const stier = msgs.filter(m => m.bilde && !Api.bildeAdresse(m.bilde)).map(m => m.bilde);
+    if (stier.length) Api.bildeUrl(stier).catch(() => {});
     if (!msgs.length && S.loadingChat) return venter("Henter meldinger");
     if (!msgs.length) {
       return `<p class="muted" style="text-align:center;padding:30px 0">Ingen meldinger her ennå. Skriv den første.</p>`;
@@ -709,7 +716,12 @@ const UI = (() => {
             <span class="svarnavn">${esc(svarPaa ? (svarPaa.mine ? "Deg" : svarPaa.who) : "Slettet melding")}</span>
             <span class="svartekst">${esc(svarPaa ? svarPaa.txt : "meldingen finnes ikke lenger")}</span>
           </button>` : ""}
-        <div class="bubble">${medLenker(m.txt)}</div>
+        ${m.bilde ? `<button class="bildeboks" data-bilde="${esc(m.bilde)}">
+            ${Api.bildeAdresse(m.bilde)
+              ? `<img src="${esc(Api.bildeAdresse(m.bilde))}" alt="Bilde i chatten" loading="lazy">`
+              : `<span class="bildelaster">${prikker()}</span>`}
+          </button>` : ""}
+        ${m.txt ? `<div class="bubble">${medLenker(m.txt)}</div>` : ""}
         <button class="msgmeny" data-msgmeny="${esc(m.id)}" aria-label="Svar eller reager">⋯</button>
         ${rea.length ? `<div class="reaksjoner" data-rea="${esc(m.id)}">
             ${rea.map(r => `<button class="rea ${r.min ? "min" : ""}" data-emoji="${esc(r.emoji)}" data-pa="${esc(m.id)}">
@@ -1177,10 +1189,16 @@ const UI = (() => {
           <button class="minibtn" id="avbrytSvar" aria-label="Avbryt svaret">✕</button>
         </div>` : ""}
         <form class="composer" id="composer">
+          ${S.trip.bilder ? `<label class="bildeknapp" aria-label="Send bilde">
+            ${ICON.bilde}
+            <input type="file" accept="image/*" id="bildeInput">
+          </label>` : ""}
           <input id="msgInput" placeholder="${S.svarTil ? "Skriv svaret…" : "Melding til " + esc(conv.name) + "…"}" autocomplete="off" enterkeyhint="send" maxlength="2000">
           <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
         </form>`;
       $("composer").addEventListener("submit", onSend);
+      const bildeFelt = $("bildeInput");
+      if (bildeFelt) bildeFelt.addEventListener("change", sendBilde);
       const avbryt = $("avbrytSvar");
       if (avbryt) avbryt.addEventListener("click", () => { S.svarTil = null; render(); });
       settOppMeldingsgester();
@@ -1298,6 +1316,50 @@ const UI = (() => {
   });
 
 
+  /* Bildet krympes på telefonen før det sendes — et mobilbilde er tre–fem
+     megabyte, og ingen ser forskjell på det i en chat. Teksten du har
+     skrevet blir med som bildetekst. */
+  async function sendBilde(e) {
+    const felt = e.target;
+    const fil = felt.files && felt.files[0];
+    felt.value = "";                       // samme bilde skal kunne velges igjen
+    if (!fil || !S.openChat) return;
+
+    const inn = $("msgInput");
+    const tekst = inn ? inn.value.trim() : "";
+    toast("Sender bildet…");
+
+    try {
+      const sti = await Api.lastOppBilde(S.trip.id, S.openChat, fil);
+      if (inn) inn.value = "";
+      await Api.sendMessage(S.trip.id, S.openChat, tekst, null, S.svarTil ? S.svarTil.id : null, sti);
+      S.svarTil = null;
+      S.tilBunn = true;
+      await Api.bildeUrl([sti]).catch(() => {});
+      render();
+    } catch (err) {
+      toast(err && err.kjent ? err.message : "Bildet ble ikke sendt. Sjekk nettet.");
+    }
+  }
+
+  /* Trykker du på et bilde, skal du se det i full størrelse. */
+  function visBilde(sti) {
+    const url = Api.bildeAdresse(sti);
+    if (!url) return toast("Bildet lastes fortsatt.");
+    const msgs = Api.messages(S.openChat);
+    const m = msgs.find(x => x.bilde === sti);
+    const mitt = m && m.mine;
+
+    openSheet(`<h3>Bilde</h3>
+      <img src="${esc(url)}" alt="" style="width:100%;border-radius:12px;margin:4px 0 14px">
+      <div class="stack">
+        <a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Åpne i full størrelse</a>
+        ${mitt || S.trip.role === "leader"
+          ? `<button class="btn danger" data-slettbilde="${esc(sti)}">Slett bildet</button>` : ""}
+      </div>
+      <button class="btn close" data-close>Lukk</button>`);
+  }
+
   /* ───────────────── send melding ───────────────── */
   async function onSend(e) {
     e.preventDefault();
@@ -1342,21 +1404,13 @@ const UI = (() => {
     let startY = 0, dy = 0, drar = false, kandidat = false, iHandtak = false;
 
     const kroppen = () => s.querySelector(".sheetbody");
-    const kontroll = el => el && el.closest("input, textarea, select, button, a, [contenteditable]");
 
     function start(mål, y) {
       iHandtak = !!(mål && mål.closest(".grabsone"));
-      if (!iHandtak) {
-        if (kontroll(mål)) return false;
-        const k = kroppen();
-        if (k && k.scrollTop > 0) return false;   // skroll, ikke lukk
-
-        // Bare øverst i arket. Står du midt i et skjema og skal treffe et
-        // felt, skal ikke hele arket henge etter fingeren fordi du bommet
-        // på en etikett.
-        const rute = s.getBoundingClientRect();
-        if (y - rute.top > 140) return false;
-      }
+      // Bare håndtaket drar arket. Før kunne du dra hvor som helst i de
+      // øverste 140 pikslene, og i et skjema ligger det gjerne et felt der:
+      // bommet du litt på klokkeslettet, fulgte hele arket fingeren.
+      if (!iHandtak) return false;
       kandidat = true; drar = false; startY = y; dy = 0;
       return true;
     }
@@ -2158,6 +2212,11 @@ const UI = (() => {
           ? "Reiseledere kan endre programmet og lese inn PDF-er. Du kan gi rollen videre."
           : "Reiseledere kan endre programmet."}</p>
       ${leder ? `<label class="pick" style="margin-top:14px">
+        <input type="checkbox" id="bilderPaa" ${S.trip.bilder ? "checked" : ""}>
+        <span><b>Tillat bilder i chattene</b><br>
+          <small>Bildene slettes automatisk 30 dager etter siste programdag.</small></span>
+      </label>
+      <label class="pick" style="margin-top:10px">
         <input type="checkbox" id="krevGodkjenning" ${S.trip.krevGodkjenning ? "checked" : ""}>
         <span><b>Krev godkjenning for å bli med</b><br>
           <small>Nye deltakere må slippes inn av en reiseleder. Turkoden alene holder ikke.</small></span>
@@ -2873,7 +2932,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2922,7 +2981,15 @@ const UI = (() => {
 
     if (t.dataset.opentrip) { closeSheet(); S.tab = "program"; return openTrip(t.dataset.opentrip).catch(() => toast("Klarte ikke åpne turen.")); }
     if (t.dataset.tab) { S.tab = t.dataset.tab; S.openChat = null; S.side = null; return render(); }
-    if (t.dataset.openchat) return openChat(t.dataset.openchat);
+    // Kommer du fra et ark eller fra programmet, må arket lukkes og
+    // fanen byttes — ellers åpnes chatten bak det du står i, og det ser
+    // ut som om knappen ikke gjorde noe.
+    if (t.dataset.openchat) {
+      closeSheet();
+      S.side = null;
+      S.tab = "chat";
+      return openChat(t.dataset.openchat);
+    }
 
     if (t.dataset.delitem) {
       if (!confirm("Slette dette punktet?")) return;
@@ -3004,6 +3071,20 @@ const UI = (() => {
       } catch (e) { return toast(e.message || "Klarte ikke endre."); }
     }
 
+    if (t.dataset.bilde) return visBilde(t.dataset.bilde);
+
+    if (t.dataset.slettbilde) {
+      if (!confirm("Slette bildet for alle? Det kan ikke angres.")) return;
+      try {
+        await Api.slettBilde(t.dataset.slettbilde);
+        closeSheet();
+        await Api.loadMessages(S.trip.id, S.openChat);
+        render();
+        toast("Bildet er slettet.");
+      } catch (e) { toast(e.message || "Klarte ikke slette bildet."); }
+      return;
+    }
+
     if (t.dataset.slettchat) {
       const c = S.trip.channels.find(x => x.id === t.dataset.slettchat);
       if (!confirm(`Slette «${c ? c.name : "chatten"}» for alle? Meldingene forsvinner for godt.`)) return;
@@ -3082,6 +3163,19 @@ const UI = (() => {
       closeSheet();
       render();
       return toast("Veibeskrivelser åpnes nå i " + (m.value === "apple" ? "Apple Kart." : "Google Maps."));
+    }
+
+    if (m.id === "bilderPaa") {
+      try {
+        await Api.setBilderPaa(S.trip.id, m.checked);
+        S.trip.bilder = m.checked;
+        render();
+        toast(m.checked ? "Bilder er tillatt i chattene." : "Bilder er slått av for turen.");
+      } catch {
+        m.checked = !m.checked;
+        toast("Klarte ikke lagre. Har du kjørt siste SQL?");
+      }
+      return;
     }
 
     if (m.id === "krevGodkjenning") {

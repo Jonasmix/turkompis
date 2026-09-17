@@ -148,6 +148,14 @@ button,input,select,textarea{font:inherit;color:inherit}
 .msg.me .bubble a{color:#fff}
 .stamp{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);padding:0 4px}
 
+/* Et bilde i chatten. Høyden er ikke kjent før bildet er lastet, så boksen
+   har en minstehøyde — ellers hopper samtalen når bildene dukker opp. */
+.bildeboks{border:0;padding:0;background:var(--surface-2);border-radius:15px;overflow:hidden;cursor:pointer;
+  display:block;max-width:230px;min-width:120px;min-height:90px;line-height:0}
+.msg.me .bildeboks{border-radius:15px}
+.bildeboks img{display:block;width:100%;height:auto;max-height:300px;object-fit:cover}
+.bildelaster{display:grid;place-items:center;min-height:90px;line-height:1}
+
 .aicard{margin-top:8px;border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:12px;
   background:var(--surface);padding:12px;width:100%}
 .aicard .hd{display:flex;align-items:center;gap:6px;margin-bottom:8px}
@@ -165,6 +173,12 @@ button,input,select,textarea{font:inherit;color:inherit}
   padding:12px 15px;font-size:16px;min-height:46px}
 .send{width:46px;height:46px;border-radius:50%;border:0;background:var(--blue);cursor:pointer;display:grid;place-items:center;flex:none}
 .send svg{width:19px;height:19px;stroke:var(--on-blue);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* Selve filvelgeren er skjult; etiketten er knappen. Da slipper vi å styre
+   en usynlig input som likevel må treffes med fingeren. */
+.bildeknapp{width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:var(--surface-2);
+  cursor:pointer;display:grid;place-items:center;flex:none}
+.bildeknapp svg{width:20px;height:20px;stroke:var(--ink-2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bildeknapp input{display:none}
 
 /* ---------- files ---------- */
 .filerow{display:grid;grid-template-columns:38px 1fr auto;gap:12px;align-items:center;width:100%;
