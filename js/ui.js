@@ -316,6 +316,7 @@ const UI = (() => {
       Api.loadRecent(tripId).then(() => { if (S.tab === "chat" && !S.openChat) render(); }).catch(() => {});
       Api.lastVaer(tripId);
       Api.lastVarselvalg(tripId).catch(() => {});
+      Api.lastPaameldinger(tripId);
       Api.erHer(tripId, null);
       if (trip.role === "leader") {
         Api.antallVentende(tripId).then(n => { if (n !== S.ventende) { S.ventende = n; render(); } });
@@ -452,6 +453,12 @@ const UI = (() => {
         <div class="time">${i.t ? esc(i.t) : '<span style="color:var(--ink-3)">—</span>'}${isNext ? "<em>neste</em>" : ""}</div>
         <div>
           <div class="title">${esc(i.title)}${vaerMerke(i.place, d.date, i.t, reserveSted)}</div>
+          ${i.paamelding ? (() => {
+            const folk = Api.paameldte(i.id);
+            const jeg = folk.some(p => p.meg);
+            return `<div class="paamerke${jeg ? " min" : ""}">${jeg ? "✓ påmeldt" : "Påmelding"}
+              · ${folk.length}${i.plasser ? "/" + i.plasser : ""}</div>`;
+          })() : ""}
           <div class="place">${p ? ICON.pin + esc(p.name) : `<span style="color:var(--ink-3)">${esc(i.note || "Ikke stedfestet")}</span>`}</div>
           ${S.edit ? `<div class="redigerrad">
             <span class="draha" data-drag aria-label="Dra for å flytte">⠿</span>
@@ -1417,6 +1424,41 @@ const UI = (() => {
     });
   }
 
+  /* Påmelding på ett punkt. Deltakerne ser hvem som skal, og hvor mange
+     plasser som er igjen — det er det folk spør om i chatten ellers. */
+  function paameldingsboks(it) {
+    const folk = Api.paameldte(it.id);
+    const jeg = folk.some(p => p.meg);
+    const igjen = it.plasser == null ? null : it.plasser - folk.length;
+    const fullt = igjen !== null && igjen <= 0 && !jeg;
+    const chat = it.paaChat ? S.trip.channels.find(c => c.id === it.paaChat) : null;
+
+    return `<div class="paaboks">
+      <div class="paatopp">
+        <div>
+          <b>Påmelding</b>
+          <small>${folk.length}${it.plasser ? " av " + it.plasser : ""} påmeldt${
+            igjen !== null && igjen > 0 ? ` · ${igjen} ${igjen === 1 ? "plass" : "plasser"} igjen` : ""}</small>
+        </div>
+        ${jeg ? '<span class="tag moss">du er påmeldt</span>'
+              : fullt ? '<span class="tag amber">fullt</span>' : ""}
+      </div>
+
+      ${folk.length ? `<div class="paafolk">${folk
+        .map(p => `<span class="paanavn${p.meg ? " min" : ""}">${esc(p.navn)}</span>`).join("")}</div>`
+        : `<p class="muted" style="margin:8px 0 0">Ingen har meldt seg på ennå.</p>`}
+
+      ${chat && jeg ? `<button class="linkbtn" style="margin-top:10px" data-openchat="${esc(chat.id)}">
+        Åpne chatten for de påmeldte ›</button>` : ""}
+
+      <button class="btn ${jeg ? "" : "primary"}" style="width:100%;margin-top:12px"
+        data-paa="${esc(it.id)}" data-av="${jeg ? "1" : ""}" ${fullt ? "disabled" : ""}>
+        ${jeg ? "Meld deg av" : fullt ? "Fullt" : "Meld deg på"}</button>
+      ${!jeg && chat ? `<p class="muted" style="margin-top:7px">Melder du deg på, blir du lagt til i
+        chatten «${esc(chat.name)}».</p>` : ""}
+    </div>`;
+  }
+
   /* Ett programpunkt: kart for alle, og endring for reiseledere. */
   function sheetItem(itemId) {
     const dag = S.trip.days.find(d => d.items.some(i => i.id === itemId));
@@ -1430,6 +1472,7 @@ const UI = (() => {
       <h3>${esc(it.title)}</h3>
       ${p ? `<div class="addr">${esc(p.name)}${p.addr ? " · " + esc(p.addr) : " · ingen adresse"}</div>` : ""}
       ${it.note ? `<div class="addr">${esc(it.note)}</div>` : ""}
+      ${it.paamelding ? paameldingsboks(it) : ""}
       ${p && p.addr ? `<div class="acts">
         ${kartKnapp(p, "primary")}
       </div>` : ""}
@@ -1452,6 +1495,30 @@ const UI = (() => {
             <div class="field"><label for="eAdr">Adresse</label><input id="eAdr" placeholder="Gate, postnummer, sted"></div>
           </div>
           <div class="field"><label for="eNotat">Notat</label><input id="eNotat" value="${esc(it.note)}"></div>
+
+          <label class="pick" style="margin-bottom:10px">
+            <input type="checkbox" id="ePaa" ${it.paamelding ? "checked" : ""}>
+            <span><b>Påmelding</b><br>
+              <small>For punkter der ikke alle skal være med. Deltakerne melder seg på selv,
+                og alle ser hvem som skal.</small></span>
+          </label>
+
+          <div id="ePaaValg" ${it.paamelding ? "" : "hidden"}>
+            <div class="field"><label for="ePlasser">Plasser</label>
+              <input id="ePlasser" type="number" min="1" max="999" inputmode="numeric"
+                     value="${it.plasser == null ? "" : it.plasser}" placeholder="Ingen grense">
+              <small style="display:block;margin-top:5px;font-size:12.5px;color:var(--ink-3)">
+                La stå tomt hvis alle som vil kan bli med. Er det fullt, slipper ingen flere inn.</small>
+            </div>
+            <label class="pick" style="margin-bottom:10px">
+              <input type="checkbox" id="ePaaChat" ${it.paaChat ? "checked" : ""}>
+              <span><b>Egen chat for de påmeldte</b><br>
+                <small>${it.paaChat
+                  ? "Chatten finnes. Skrur du av, blir den stående, men nye påmeldte legges ikke til."
+                  : "Lager en privat chat. Den som melder seg på blir lagt til, og tatt ut igjen hvis hen melder seg av."}</small></span>
+            </label>
+          </div>
+
           <p class="err" id="eErr" hidden></p>
           <button class="btn primary big" type="submit" id="eLagre">Lagre endringene</button>
         </form>
@@ -1463,6 +1530,10 @@ const UI = (() => {
 
     $("eSted").addEventListener("change", e => {
       $("eNyttSted").hidden = e.target.value !== "__new";
+    });
+
+    $("ePaa").addEventListener("change", e => {
+      $("ePaaValg").hidden = !e.target.checked;
     });
 
     $("itemForm").addEventListener("submit", async e => {
@@ -1478,11 +1549,25 @@ const UI = (() => {
             name: navn, addr: $("eAdr").value.trim(), kind: "Sted"
           });
         }
+        const paaPaa = $("ePaa").checked;
+        const vilChat = paaPaa && $("ePaaChat").checked;
+
+        // Chatten lages først når noen faktisk vil ha den, og bare én
+        // gang — skrur man av og på igjen, skal den gamle brukes.
+        let chatId = it.paaChat || null;
+        if (vilChat && !chatId) {
+          chatId = await Api.addChannel(
+            S.trip.id, ($("eTittel").value.trim() || it.title).slice(0, 60), "Påmeldte", true, []);
+        }
+
         await Api.updateItem(it.id, {
           t: $("eTid").value,
           title: $("eTittel").value.trim() || it.title,
           placeId,
-          note: $("eNotat").value.trim()
+          note: $("eNotat").value.trim(),
+          paamelding: paaPaa,
+          plasser: paaPaa ? $("ePlasser").value : null,
+          paaChat: vilChat ? chatId : null
         });
         closeSheet();
         await openTrip(S.trip.id);
@@ -2764,7 +2849,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -2893,6 +2978,23 @@ const UI = (() => {
         await openTrip(S.trip.id);
         return aapneDeltakere(true);
       } catch (e) { return toast(e.message || "Klarte ikke endre."); }
+    }
+
+    if (t.dataset.paa) {
+      const av = Boolean(t.dataset.av);
+      t.disabled = true; t.innerHTML = prikker() + (av ? " Melder av" : " Melder på");
+      try {
+        if (av) await Api.meldAv(t.dataset.paa); else await Api.meldPaa(t.dataset.paa);
+        await Api.lastPaameldinger(S.trip.id);
+        await openTrip(S.trip.id);
+        sheetItem(t.dataset.paa);
+        toast(av ? "Du er meldt av." : "Du er påmeldt.");
+      } catch (e) {
+        toast(e.message || "Det gikk ikke.");
+        await Api.lastPaameldinger(S.trip.id);
+        sheetItem(t.dataset.paa);
+      }
+      return;
     }
 
     if (t.dataset.nye) { S.nye = 0; S.tilBunn = true; return render(); }

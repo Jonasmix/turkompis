@@ -14,7 +14,7 @@ const Api = (() => {
   let liveTrip = null;           // hvilken tur abonnementet gjelder
   let reaSub = null;             // abonnement på reaksjoner i én chat
   let reaKanal = null;
-  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {}, mer: {}, varsel: null };
+  const cache = { trip: null, messages: {}, recent: {}, reactions: {}, vaer: {}, mer: {}, varsel: null, paa: {} };
   const SIDE = 300;              // meldinger per bunke
   const listeners = new Set();
 
@@ -159,6 +159,9 @@ const Api = (() => {
     if (m.includes("ikke_deg_selv")) return k("Bruk «Meld deg av» for å gå ut selv.");
     if (m.includes("eier_kan_ikke_fjernes")) return k("Den som laget turen kan ikke fjernes.");
     if (m.includes("kan_ikke_endres")) return k("Denne deltakeren kan ikke endres herfra.");
+    if (m.includes("fullt")) return k("Det er fullt — alle plassene er tatt.");
+    if (m.includes("ikke_paamelding")) return k("Dette punktet har ikke påmelding.");
+    if (m.includes("ukjent_punkt")) return k("Fant ikke programpunktet.");
     if (m.includes("for_mange_meldinger")) return k("Du skriver fort. Vent et lite øyeblikk.");
     if (m.includes("for_mange_chatter")) return k("Du har laget mange chatter på denne turen. Rydd i dem først.");
     if (m.includes("ikke_innlogget")) return k("Appen fikk ikke kontakt med serveren. Prøv igjen.");
@@ -260,6 +263,8 @@ const Api = (() => {
         id: d.id, date: d.date, hotel: d.hotel_place_id, ignorerHotell: d.ignore_hotel === true,
         items: (byDay[d.id] || []).sort(rekkefolge).map(i => ({
           id: i.id, t: i.t || "", title: i.title, place: i.place_id, note: i.note, src: i.src,
+          paamelding: i.paamelding === true, plasser: i.plasser == null ? null : i.plasser,
+          paaChat: i.paa_chat || null,
           sort: (i.sort === undefined || i.sort === null) ? null : i.sort
         }))
       }, fmtDay(d.date))),
@@ -985,6 +990,41 @@ const Api = (() => {
     return svar.data.id;
   }
 
+  /* ───────── påmelding ─────────
+     Hvem som har meldt seg på hva. Hentes for hele turen på én gang —
+     programlista skal kunne vise «6 av 20» uten å spørre per punkt. */
+  async function lastPaameldinger(tripId) {
+    if (!online()) return;
+    const { data, error } = await sb.from("paameldinger")
+      .select("item_id, user_id, name, items!inner(trip_id)")
+      .eq("items.trip_id", tripId);
+    if (error) { cache.paa = {}; return; }
+
+    const kart = {};
+    for (const r of (data || [])) {
+      (kart[r.item_id] = kart[r.item_id] || []).push({
+        id: r.user_id, navn: r.name, meg: r.user_id === userId
+      });
+    }
+    cache.paa = kart;
+    fire();
+  }
+
+  const paameldte = itemId => (cache.paa || {})[itemId] || [];
+
+  async function meldPaa(itemId) {
+    const p = getProfile();
+    const { error } = await sb.rpc("meld_paa", {
+      p_item: itemId, p_navn: p ? p.name : "Deltaker"
+    });
+    if (error) throw friendly(error);
+  }
+
+  async function meldAv(itemId) {
+    const { error } = await sb.rpc("meld_av", { p_item: itemId });
+    if (error) throw friendly(error);
+  }
+
   /* Endre et punkt som allerede ligger inne: tid, tittel, sted eller notat. */
   async function updateItem(id, felter) {
     const rad = {};
@@ -993,6 +1033,9 @@ const Api = (() => {
     if ("placeId" in felter) rad.place_id = felter.placeId || null;
     if ("note" in felter) rad.note = felter.note || "";
     if ("sort" in felter) rad.sort = felter.sort;
+    if ("paamelding" in felter) rad.paamelding = !!felter.paamelding;
+    if ("plasser" in felter) rad.plasser = felter.plasser === "" || felter.plasser == null ? null : Number(felter.plasser);
+    if ("paaChat" in felter) rad.paa_chat = felter.paaChat || null;
     const dato = datoForPunkt(id);
     const { error } = await sb.from("items").update(rad).eq("id", id);
     if (error) throw error;
@@ -1315,6 +1358,7 @@ const Api = (() => {
     addChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,
+    lastPaameldinger, paameldte, meldPaa, meldAv,
     applyTemplate, lesProgramFraPdf, signOutLocal,
     varselStatus, slaaPaaVarsler, slaaAvVarsler, varselEnheter, testVarsel, varmVarsler,
     erHer, ikkeHer,

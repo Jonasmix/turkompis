@@ -477,6 +477,31 @@ label.person span{flex:1;min-width:0}
 .msg.me .msgmeny{ right:auto; left:-30px }
 @media (hover: hover) and (pointer: fine) { .msgmeny{ display:grid } .msg{ position:relative } }
 
+/* ---------- påmelding ----------
+   Hvem som skal, og hvor mange plasser som er igjen. Det er nettopp det
+   folk spør om i chatten når et punkt er valgfritt. */
+.paaboks{
+  margin-top:16px;padding:14px;border-radius:var(--r);
+  background:var(--surface-2);border:1px solid var(--line-soft);
+}
+.paatopp{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.paatopp b{display:block;font-family:"Archivo",sans-serif;font-size:14.5px}
+.paatopp small{display:block;font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.paafolk{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.paanavn{
+  font-size:12.5px;padding:4px 9px;border-radius:20px;
+  background:var(--surface);border:1px solid var(--line);color:var(--ink-2);
+}
+.paanavn.min{background:var(--moss-soft);border-color:var(--moss);color:var(--moss);font-weight:600}
+
+/* Merket i programlista, så man ser det uten å åpne punktet. */
+.paamerke{
+  display:inline-block;margin-top:4px;font-family:"Archivo",sans-serif;
+  font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:20px;
+  background:var(--blue-soft);color:var(--blue-ink);
+}
+.paamerke.min{background:var(--moss-soft);color:var(--moss)}
+
 /* ---------- Meg ---------- */
 /* Hvem du er, én gang øverst — resten av fana er lister med rader, ikke
    en stabel med knapper. Det som er farlig å trykke på, ligger sammen og
