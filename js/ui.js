@@ -1472,7 +1472,14 @@ const UI = (() => {
   function lukkBilde(fraHistorikk) {
     const el = $("bildevisning");
     if (!el) return false;
-    el.remove();
+    // Id-en fjernes med en gang, så alt annet regner bildet som lukket
+    // mens det fortsatt toner ut.
+    el.id = "";
+    if (el.style.opacity !== "0") {
+      el.style.transition = "opacity .16s ease-out";
+      el.style.opacity = "0";
+    }
+    setTimeout(() => el.remove(), 240);
     if (!fraHistorikk && history.state && history.state.bilde) gaaTilbake();
     return true;
   }
@@ -1501,8 +1508,14 @@ const UI = (() => {
     const slipp = () => {
       if (!drar) return;
       drar = false;
-      el.style.transition = "transform .18s ease-out, background .18s ease-out";
-      if (dy > 110) return lukkBilde();
+      if (dy > 110) {
+        // Bildet fortsetter veien det var på vei, i stedet for å blinke bort.
+        el.style.transition = "transform .24s ease-out, opacity .24s ease-out";
+        el.style.transform = `translateY(${Math.max(dy + 220, 320)}px)`;
+        el.style.opacity = "0";
+        return lukkBilde();
+      }
+      el.style.transition = "transform .26s cubic-bezier(.22,.61,.36,1), background .26s ease-out";
       el.style.transform = "";
       el.style.background = "";
     };
@@ -1643,12 +1656,27 @@ const UI = (() => {
       return kanStoppe;
     }
 
+    /* Slipper du langt nok nede, skal arket gli ut av skjermen — ikke
+       forsvinne i samme sekund. Bakgrunnen lysner i samme takt, så det
+       ser ut som det legger seg fra deg. */
+    function lukkArkAnimert() {
+      const bg = $("sheetBg");
+      s.style.transform = "translateY(100%)";
+      bg.style.transition = "background .24s ease-out";
+      bg.style.background = "rgba(9,15,22,0)";
+      setTimeout(() => {
+        closeSheet();
+        bg.style.transition = "";
+        bg.style.background = "";
+      }, 230);
+    }
+
     function slutt() {
       kandidat = false;
       if (!drar) return;
       drar = false;
       s.classList.remove("dragging");
-      if (dy > 100) closeSheet();
+      if (dy > 100) lukkArkAnimert();
       else s.style.transform = "";
     }
 

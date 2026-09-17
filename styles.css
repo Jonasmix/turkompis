@@ -11,6 +11,10 @@
   --safe-b:env(safe-area-inset-bottom,0px);
   color-scheme:light;   /* appen er lys uansett hva telefonen staar paa */
 }
+/* Med tastaturet oppe ligger det ikke noe hjemknapp-felt nederst lenger —
+   tastaturet dekker det. Holder vi av plass til det likevel, blir det en
+   hvit stripe mellom skrivefeltet og tastene. */
+html.tastatur{--safe-b:0px}
 
 *{box-sizing:border-box}
 html{touch-action:manipulation}   /* slaar av dobbelttrykk-zoom */
@@ -347,7 +351,9 @@ label.person span{flex:1;min-width:0}
   font-family:"Archivo",sans-serif;font-weight:600;font-size:12px;padding:8px 11px;cursor:pointer;flex:none;min-height:40px}
 
 /* Ark kan dras ned for å lukkes. */
-.sheet{touch-action:pan-y;will-change:transform}
+.sheet{touch-action:pan-y;will-change:transform;
+  /* Slipper du arket halvveis, skal det gli på plass, ikke smekke. */
+  transition:transform .26s cubic-bezier(.22,.61,.36,1)}
 .sheet .grab{width:44px;height:5px;margin:0 auto 14px;border-radius:3px;background:var(--line);cursor:grab}
 .sheet.dragging{transition:none !important}
 
