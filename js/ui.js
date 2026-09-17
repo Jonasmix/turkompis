@@ -6,7 +6,7 @@ const UI = (() => {
     nye: 0, sistAntall: 0, beholdSkroll: null,
     side: null, varselStatus: null, varselEnheter: null, varselTest: null,
     folk: null, folkFeil: false, sisteVisning: null,
-    sideChat: null, chatFolk: null, ventende: 0 };
+    sideChat: null, chatFolk: null, ventende: 0, vedlegg: null, sender: false, sisteComposer: null };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -778,6 +778,8 @@ const UI = (() => {
       if (e.target.closest("button, a") && !e.target.closest(".bildeboks")) return;
       rad = e.target.closest(".msg");
       if (!rad) return;
+      const del = e.target.closest(".bildeboks") ? "bilde"
+                : e.target.closest(".bubble") ? "tekst" : null;
       startX = e.clientX; startY = e.clientY; sveiper = false;
       holder = setTimeout(() => {
         holder = null;
@@ -789,7 +791,7 @@ const UI = (() => {
         // Holdt du på et bilde, kommer det et trykk etterpå som ellers
         // ville åpnet bildet i full skjerm oppå valgene du nettopp fikk.
         sisteHold = Date.now();
-        sheetEmoji(id);
+        sheetEmoji(id, del);
       }, 450);
     });
 
@@ -862,16 +864,34 @@ const UI = (() => {
     el.classList.add("blink");
   }
 
-  function sheetEmoji(id) {
+  /* Bildet og teksten er to ting, selv om de kom i samme melding. Holder
+     du på bildet, handler menyen om bildet; holder du på teksten, handler
+     den om teksten. «del» sier hvilken av dem du tok tak i — uten den
+     vises begge, som når du bruker de tre prikkene. */
+  function sheetEmoji(id, del) {
     const m = Api.messages(S.openChat).find(x => x.id === id);
     const rea = Api.reactions(S.openChat, id);
     const bilde = m && m.bilde;
     const txt = (m && m.txt) || "";
-    if (bilde) forberedBlob(bilde);
+    const viserBilde = bilde && del !== "tekst";
+    const viserTekst = txt && del !== "bilde";
+    const kanSlette = m && (m.mine || S.trip.role === "leader");
+    if (viserBilde) forberedBlob(bilde);
 
-    openSheet(`<h3>${bilde ? "Bilde" : "Reager"}</h3>
-      ${bilde ? `<div class="sheetbilde"><img src="${esc(Api.bildeAdresse(bilde) || "")}" alt=""></div>` : ""}
-      ${txt ? `<p class="muted" style="margin:6px 0 14px">${esc(txt.slice(0, 90))}${txt.length > 90 ? "…" : ""}</p>` : ""}
+    // Er det bare den ene delen igjen etterpå, er det ikke noe igjen av
+    // meldingen heller — da slettes hele.
+    const slettBildet = `<button class="btn danger" ${txt
+      ? `data-slettbilde="${esc(bilde)}"` : `data-delmsg="${esc(id)}"`}>Slett bildet</button>`;
+    const slettTeksten = `<button class="btn danger" ${bilde
+      ? `data-deltekst="${esc(id)}"` : `data-delmsg="${esc(id)}"`}>Slett ${bilde ? "teksten" : "meldingen"}</button>`;
+    const slettvalg = !kanSlette ? ""
+      : del === "bilde" ? (bilde ? slettBildet : slettTeksten)
+      : del === "tekst" ? (txt ? slettTeksten : slettBildet)
+      : (bilde ? slettBildet : "") + (txt ? slettTeksten : "");
+
+    openSheet(`<h3>${viserBilde && !viserTekst ? "Bilde" : "Melding"}</h3>
+      ${viserBilde ? `<div class="sheetbilde"><img src="${esc(Api.bildeAdresse(bilde) || "")}" alt=""></div>` : ""}
+      ${viserTekst ? `<p class="muted" style="margin:6px 0 14px">${esc(txt.slice(0, 90))}${txt.length > 90 ? "…" : ""}</p>` : ""}
       <div class="emojirad">
         ${EMOJIER.map(e => `<button class="emojiknapp" data-emoji="${e}" data-pa="${esc(id)}">${e}</button>`).join("")}
       </div>
@@ -879,13 +899,10 @@ const UI = (() => {
         <div class="memberlist">${rea.map(r => `<div class="person">
           <span>${esc(r.emoji)} ${esc(r.navn.join(", "))}</span></div>`).join("")}</div>` : ""}
       <div class="stack" style="margin-top:14px">
-        <button class="btn" data-svar="${esc(id)}">Svar på ${bilde && !txt ? "bildet" : "meldingen"}</button>
-        ${bilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>` : ""}
-        ${txt ? `<button class="btn" data-kopimeld="${esc(txt)}">Kopier teksten</button>` : ""}
-        ${m && (m.mine || S.trip.role === "leader") ? `
-          ${bilde && txt
-            ? `<button class="btn danger" data-slettbilde="${esc(bilde)}">Slett bildet, behold teksten</button>` : ""}
-          <button class="btn danger" data-delmsg="${esc(id)}">Slett ${bilde && !txt ? "bildet" : "meldingen"}</button>` : ""}
+        <button class="btn" data-svar="${esc(id)}">Svar på ${viserBilde && !viserTekst ? "bildet" : "meldingen"}</button>
+        ${viserBilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>` : ""}
+        ${viserTekst ? `<button class="btn" data-kopimeld="${esc(txt)}">Kopier teksten</button>` : ""}
+        ${slettvalg}
       </div>
       <button class="btn close" data-close>Lukk</button>`);
   }
@@ -1212,6 +1229,15 @@ const UI = (() => {
     if (byttetVisning && !conv) $("screen").scrollTop = 0;
 
     const slot = $("composerSlot");
+    // Skrivefeltet bygges opp på nytt hver gang noe tegnes. Det du har
+    // skrevet, men ikke sendt, skal ikke forsvinne fordi det kom en
+    // melding fra noen andre imens — eller fordi du valgte et bilde.
+    const gammeltFelt = $("msgInput");
+    const utkast = gammeltFelt && S.sisteComposer === S.openChat ? gammeltFelt.value : "";
+    const haddeFokus = gammeltFelt && document.activeElement === gammeltFelt;
+    const markor = haddeFokus ? gammeltFelt.selectionStart : null;
+    S.sisteComposer = S.openChat;
+
     if (conv && !S.offline) {
       slot.innerHTML = `
         ${S.nye ? `<button class="nyepill" data-nye="1">${S.nye} ny${S.nye === 1 ? " melding" : "e meldinger"} ↓</button>` : ""}
@@ -1224,6 +1250,14 @@ const UI = (() => {
           </div>
           <button class="minibtn" id="avbrytSvar" aria-label="Avbryt svaret">✕</button>
         </div>` : ""}
+        ${S.vedlegg ? `<div class="vedlegg">
+          <img src="${esc(S.vedlegg.url)}" alt="">
+          <div class="vedleggtekst">
+            <b>${S.sender ? "Sender bildet…" : "Bilde klart"}</b>
+            <span>${S.sender ? "Vent litt." : "Skriv gjerne noe til det, og trykk send."}</span>
+          </div>
+          ${S.sender ? prikker() : `<button class="minibtn" id="fjernVedlegg" aria-label="Fjern bildet">✕</button>`}
+        </div>` : ""}
         <form class="composer" id="composer">
           ${S.trip.bilder ? `${harKamera() ? `<label class="bildeknapp" aria-label="Ta bilde">
             ${ICON.bilde}
@@ -1234,12 +1268,21 @@ const UI = (() => {
             <input type="file" accept="image/*" id="bildeInput">
           </label>` : ""}
           <input id="msgInput" placeholder="${S.svarTil ? "Skriv svaret…" : "Melding til " + esc(conv.name) + "…"}" autocomplete="off" enterkeyhint="send" maxlength="2000">
-          <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
+          <button class="send" type="submit" aria-label="Send melding" ${S.sender ? "disabled" : ""}>${ICON.send}</button>
         </form>`;
       $("composer").addEventListener("submit", onSend);
       for (const id of ["bildeInput", "kameraInput"]) {
         const felt = $(id);
-        if (felt) felt.addEventListener("change", sendBilde);
+        if (felt) felt.addEventListener("change", velgBilde);
+      }
+      const bortVedlegg = $("fjernVedlegg");
+      if (bortVedlegg) bortVedlegg.addEventListener("click", fjernVedlegg);
+
+      const nyttFelt = $("msgInput");
+      if (nyttFelt && utkast) nyttFelt.value = utkast;
+      if (nyttFelt && haddeFokus) {
+        nyttFelt.focus();
+        try { nyttFelt.setSelectionRange(markor, markor); } catch {}
       }
       const avbryt = $("avbrytSvar");
       if (avbryt) avbryt.addEventListener("click", () => { S.svarTil = null; render(); });
@@ -1307,6 +1350,8 @@ const UI = (() => {
   function closeChat(fromHistory) {
     if (!S.openChat) return false;
     S.openChat = null;
+    if (S.vedlegg) { URL.revokeObjectURL(S.vedlegg.url); S.vedlegg = null; }
+    S.sender = false;
     S.nye = 0;
     Api.unsubscribeChannel();
     Api.erHer(S.trip.id, null);
@@ -1359,30 +1404,27 @@ const UI = (() => {
   });
 
 
-  /* Bildet krympes på telefonen før det sendes — et mobilbilde er tre–fem
-     megabyte, og ingen ser forskjell på det i en chat. Teksten du har
-     skrevet blir med som bildetekst. */
-  async function sendBilde(e) {
+  /* Bildet legger seg over skrivefeltet og blir liggende der til du
+     trykker send. Da rekker du å skrive noe til det, se at du valgte
+     riktig bilde, eller ombestemme deg — i stedet for at et feiltrykk
+     ryker ut til hele klassen. */
+  function velgBilde(e) {
     const felt = e.target;
     const fil = felt.files && felt.files[0];
     felt.value = "";                       // samme bilde skal kunne velges igjen
     if (!fil || !S.openChat) return;
-
+    if (S.vedlegg) URL.revokeObjectURL(S.vedlegg.url);
+    S.vedlegg = { fil, url: URL.createObjectURL(fil) };
+    render();
     const inn = $("msgInput");
-    const tekst = inn ? inn.value.trim() : "";
-    toast("Sender bildet…");
+    if (inn) inn.focus();
+  }
 
-    try {
-      const sti = await Api.lastOppBilde(S.trip.id, S.openChat, fil);
-      if (inn) inn.value = "";
-      await Api.sendMessage(S.trip.id, S.openChat, tekst, null, S.svarTil ? S.svarTil.id : null, sti);
-      S.svarTil = null;
-      S.tilBunn = true;
-      await Api.bildeUrl([sti]).catch(() => {});
-      render();
-    } catch (err) {
-      toast(err && err.kjent ? err.message : "Bildet ble ikke sendt. Sjekk nettet.");
-    }
+  function fjernVedlegg() {
+    if (!S.vedlegg) return;
+    URL.revokeObjectURL(S.vedlegg.url);
+    S.vedlegg = null;
+    render();
   }
 
   /* Trykker du på et bilde, fyller det skjermen — ikke et ark med bildet
@@ -1507,17 +1549,35 @@ const UI = (() => {
     e.preventDefault();
     const inp = $("msgInput");
     const txt = inp.value.trim();
-    if (!txt || S.busy) return;
+    const vedlegg = S.vedlegg;
+    if ((!txt && !vedlegg) || S.busy) return;
     inp.value = "";
-    const action = Parse.analyse(S.trip, txt);
+    // Uten bilde tolker vi teksten; med bilde er den en bildetekst, og en
+    // bildetekst skal ikke plutselig lage et programpunkt.
+    const action = vedlegg ? null : Parse.analyse(S.trip, txt);
+    let sti = null;
     try {
-      await Api.sendMessage(S.trip.id, S.openChat, txt, action, S.svarTil ? S.svarTil.id : null);
+      if (vedlegg) {
+        S.sender = true; render();
+        sti = await Api.lastOppBilde(S.trip.id, S.openChat, vedlegg.fil);
+        URL.revokeObjectURL(vedlegg.url);
+        S.vedlegg = null;
+        await Api.bildeUrl([sti]).catch(() => {});
+      }
+      await Api.sendMessage(S.trip.id, S.openChat, txt, action, S.svarTil ? S.svarTil.id : null, sti);
       S.svarTil = null;
+      S.sender = false;
       S.tilBunn = true;          // din egen melding skal du alltid se
       render();
     } catch (err) {
+      S.sender = false;
       inp.value = txt;
-      toast(err && err.kjent ? err.message : "Meldingen ble ikke sendt. Sjekk nettet.");
+      // Bildet legges tilbake så du kan prøve igjen — med mindre det alt
+      // er lastet opp, og det bare var selve meldingen som ikke gikk.
+      if (vedlegg && !sti) S.vedlegg = vedlegg;
+      render();
+      toast(err && err.kjent ? err.message
+        : vedlegg ? "Bildet ble ikke sendt. Sjekk nettet." : "Meldingen ble ikke sendt. Sjekk nettet.");
     }
   }
 
@@ -3074,7 +3134,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-deltekst],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -3231,8 +3291,14 @@ const UI = (() => {
       return visBilde(t.dataset.bilde);
     }
     if (t.hasAttribute("data-bvlukk")) return lukkBilde();
-    if (t.dataset.bvmeny) return sheetEmoji(t.dataset.bvmeny);
+    if (t.dataset.bvmeny) return sheetEmoji(t.dataset.bvmeny, "bilde");
     if (t.dataset.lagrebilde) return lagreBilde(t.dataset.lagrebilde);
+    if (t.dataset.deltekst) {
+      if (!confirm("Slette teksten for alle? Bildet blir stående.")) return;
+      try { await Api.slettTekst(t.dataset.deltekst, S.openChat); closeSheet(); render(); }
+      catch { toast("Klarte ikke slette teksten. Har du kjørt siste SQL?"); }
+      return;
+    }
     if (t.dataset.kopimeld) {
       closeSheet();
       try { await navigator.clipboard.writeText(t.dataset.kopimeld); toast("Teksten er kopiert."); }

@@ -908,6 +908,19 @@ const Api = (() => {
     } catch { /* ryddes neste gang */ }
   }
 
+  /* Teksten under et bilde er sin egen ting, og kan fjernes for seg. Er
+     det ikke noe bilde, er teksten hele meldingen — da forsvinner den. */
+  async function slettTekst(id, channelId) {
+    const { error } = await sb.rpc("fjern_tekst", { p_id: id });
+    if (error) throw friendly(error);
+    const liste = cache.messages[channelId];
+    if (!liste) return;
+    const i = liste.findIndex(m => m.id === id);
+    if (i < 0) return;
+    if (liste[i].bilde) liste[i].txt = "";
+    else liste.splice(i, 1);
+  }
+
   async function setBilderPaa(tripId, paa) {
     const { error } = await sb.from("trips").update({ bilder: !!paa }).eq("id", tripId);
     if (error) throw friendly(error);
@@ -1490,7 +1503,7 @@ const Api = (() => {
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
     sendMessage, deleteMessage, onChange,
     reactions, toggleReaction, lastReaksjoner, vaerFor, vaerPunkt, lastVaer,
-    lastOppBilde, bildeUrl, bildeAdresse, slettBilde, ryddGamleBilder, setBilderPaa,
+    lastOppBilde, bildeUrl, bildeAdresse, slettBilde, slettTekst, ryddGamleBilder, setBilderPaa,
     addChannel, deleteChannel, tripMembers, channelMembers, addChannelMember, removeChannelMember, setMemberRole,
     setKrevGodkjenning, godkjennDeltaker, avvisDeltaker, fjernDeltaker,
     addPlace, updatePlace, setIgnorer, addDay, setHotel, addItem, updateItem, deleteItem, deleteDay,

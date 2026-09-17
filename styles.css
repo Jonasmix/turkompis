@@ -456,6 +456,18 @@ label.person span{flex:1;min-width:0}
   display:flex;align-items:center;gap:10px;padding:9px 14px;
   border-top:1px solid var(--line-soft);background:var(--surface-2);
 }
+/* Bildet du har valgt, men ikke sendt. Det ligger over skrivefeltet til
+   du trykker send, så du rekker å se at du valgte riktig. */
+.vedlegg{
+  display:flex;align-items:center;gap:11px;padding:9px 14px;
+  border-top:1px solid var(--line-soft);background:var(--surface-2);
+}
+.vedlegg img{flex:none;width:46px;height:46px;border-radius:9px;object-fit:cover;background:var(--line-soft)}
+.vedleggtekst{flex:1;min-width:0}
+.vedleggtekst b{display:block;font-family:"Archivo",sans-serif;font-size:12.5px}
+.vedleggtekst span{display:block;font-size:12.5px;color:var(--ink-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 .svarinfo{flex:1;min-width:0}
 .svarinfo b{display:block;font-family:"Archivo",sans-serif;font-size:12px;color:var(--blue-ink)}
 .svarinfo span{display:block;font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
