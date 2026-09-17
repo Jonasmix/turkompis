@@ -741,7 +741,7 @@ const UI = (() => {
             ${rea.map(r => `<button class="rea ${r.min ? "min" : ""}" data-emoji="${esc(r.emoji)}" data-pa="${esc(m.id)}">
               ${esc(r.emoji)}<span>${r.navn.length}</span></button>`).join("")}
           </div>` : ""}
-        <div class="stamp">${esc(dayStamp(m.ts))}${m.mine ? ` · <button class="linkbtn" style="font-size:10.5px" data-delmsg="${esc(m.id)}">slett</button>` : ""}</div>
+        <div class="stamp">${esc(dayStamp(m.ts))}</div>
         ${m.action ? actionCard(m.action, m.id) : ""}
       </div>`;
     }).join("");
@@ -880,9 +880,12 @@ const UI = (() => {
           <span>${esc(r.emoji)} ${esc(r.navn.join(", "))}</span></div>`).join("")}</div>` : ""}
       <div class="stack" style="margin-top:14px">
         <button class="btn" data-svar="${esc(id)}">Svar på ${bilde && !txt ? "bildet" : "meldingen"}</button>
-        ${bilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>
-          ${m.mine || S.trip.role === "leader"
-            ? `<button class="btn danger" data-slettbilde="${esc(bilde)}">Slett bildet</button>` : ""}` : ""}
+        ${bilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>` : ""}
+        ${txt ? `<button class="btn" data-kopimeld="${esc(txt)}">Kopier teksten</button>` : ""}
+        ${m && (m.mine || S.trip.role === "leader") ? `
+          ${bilde && txt
+            ? `<button class="btn danger" data-slettbilde="${esc(bilde)}">Slett bildet, behold teksten</button>` : ""}
+          <button class="btn danger" data-delmsg="${esc(id)}">Slett ${bilde && !txt ? "bildet" : "meldingen"}</button>` : ""}
       </div>
       <button class="btn close" data-close>Lukk</button>`);
   }
@@ -1404,6 +1407,8 @@ const UI = (() => {
       </div>
       <img src="${esc(url)}" alt="Bilde i chatten">`;
     document.body.appendChild(el);
+    dragNedForAaLukke(el);
+    morkTopp(true);
     forberedBlob(sti);
     if (!fraHistorikk) history.pushState({ bilde: sti }, "");
   }
@@ -1412,8 +1417,51 @@ const UI = (() => {
     const el = $("bildevisning");
     if (!el) return false;
     el.remove();
+    morkTopp(false);
     if (!fraHistorikk && history.state && history.state.bilde) history.back();
     return true;
+  }
+
+  /* Stripa med klokka og batteriet tar fargen fra siden under. Står den
+     hvit over et svart bilde, ser det ut som appen slutter midt på
+     skjermen. Så lenge bildet vises, er den svart som resten. */
+  function morkTopp(paa) {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", paa ? "#06090D" : "#14508C");
+    document.body.style.background = paa ? "#06090D" : "";
+  }
+
+  /* Dra bildet nedover for å legge det bort, slik man gjør i bildeapper.
+     Det følger fingeren og blekner, og slipper du langt nok nede, lukkes
+     det. Angrer du på halvveien, sklir det på plass igjen. */
+  function dragNedForAaLukke(el) {
+    let startY = 0, dy = 0, drar = false;
+
+    el.addEventListener("touchstart", e => {
+      if (e.touches.length !== 1 || e.target.closest("button")) return;
+      startY = e.touches[0].clientY; dy = 0; drar = true;
+      el.style.transition = "none";
+    }, { passive: true });
+
+    el.addEventListener("touchmove", e => {
+      if (!drar) return;
+      dy = e.touches[0].clientY - startY;
+      if (dy < 0) dy = dy / 4;                    // oppover gir etter, men lukker ikke
+      el.style.transform = `translateY(${dy}px)`;
+      el.style.background = `rgba(6,9,13,${Math.max(0.2, 1 - Math.abs(dy) / 500)})`;
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    const slipp = () => {
+      if (!drar) return;
+      drar = false;
+      el.style.transition = "transform .18s ease-out, background .18s ease-out";
+      if (dy > 110) return lukkBilde();
+      el.style.transform = "";
+      el.style.background = "";
+    };
+    el.addEventListener("touchend", slipp);
+    el.addEventListener("touchcancel", slipp);
   }
 
   /* Bildet hentes ned i bakgrunnen med en gang du åpner det eller menyen.
@@ -3026,7 +3074,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-kopimeld],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -3098,7 +3146,20 @@ const UI = (() => {
       return;
     }
     if (t.dataset.delmsg) {
-      try { await Api.deleteMessage(t.dataset.delmsg, S.openChat); render(); }
+      const m = Api.messages(S.openChat).find(x => x.id === t.dataset.delmsg);
+      const harBilde = m && m.bilde;
+      if (!confirm(harBilde && !(m.txt)
+        ? "Slette bildet for alle? Det kan ikke angres."
+        : "Slette meldingen for alle? Det kan ikke angres.")) return;
+      try {
+        // Bildefila ligger for seg selv i lageret, og blir ikke med i
+        // dragsuget når meldingen forsvinner. Den må ryddes først.
+        if (harBilde) await Api.slettBilde(m.bilde).catch(() => {});
+        await Api.deleteMessage(t.dataset.delmsg, S.openChat);
+        closeSheet();
+        lukkBilde();
+        render();
+      }
       catch { toast("Klarte ikke slette meldingen."); }
       return;
     }
@@ -3172,6 +3233,12 @@ const UI = (() => {
     if (t.hasAttribute("data-bvlukk")) return lukkBilde();
     if (t.dataset.bvmeny) return sheetEmoji(t.dataset.bvmeny);
     if (t.dataset.lagrebilde) return lagreBilde(t.dataset.lagrebilde);
+    if (t.dataset.kopimeld) {
+      closeSheet();
+      try { await navigator.clipboard.writeText(t.dataset.kopimeld); toast("Teksten er kopiert."); }
+      catch { toast("Kopiering ble blokkert."); }
+      return;
+    }
 
     if (t.dataset.slettbilde) {
       if (!confirm("Slette bildet for alle? Det kan ikke angres.")) return;
