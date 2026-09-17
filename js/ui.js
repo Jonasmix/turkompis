@@ -67,10 +67,18 @@ const UI = (() => {
     prog:'<svg viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="18" cy="6" r="2"/><circle cx="14" cy="18" r="2"/></svg>',
     me:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
     bilde:'<svg viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="14" rx="2.5"/><circle cx="12" cy="12.5" r="3.4"/><path d="M8 5.5 9.2 3h5.6l1.2 2.5"/></svg>',
+    bibliotek:'<svg viewBox="0 0 24 24"><rect x="7.5" y="3" width="13.5" height="13.5" rx="2.5"/><path d="M16.5 20.5H5.5A2.5 2.5 0 0 1 3 18V7"/><path d="m9 13 2.9-3.1 2.2 2.4 1.8-1.9L21 14"/></svg>',
+    tilbake:'<svg viewBox="0 0 24 24"><path d="M15 4.5 7.5 12l7.5 7.5"/></svg>',
+    last:'<svg viewBox="0 0 24 24"><path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5M4.5 17.5v1.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.5"/></svg>',
     send:'<svg viewBox="0 0 24 24"><path d="M4 12 20 4l-7 16-2-7-7-1Z"/></svg>',
     chevL:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="m15 6-6 6 6 6"/></svg>',
     chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
   };
+
+  /* Kameraknappen hører hjemme på en telefon. På en PC ville den åpnet
+     nøyaktig samme filvelger som knappen ved siden av, og to like knapper
+     er ingen hjelp. */
+  const harKamera = () => navigator.maxTouchPoints > 0;
 
   const cap = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
   const prikker = () => '<span class="prikker"><i></i><i></i><i></i></span>';
@@ -713,8 +721,14 @@ const UI = (() => {
       return `<div class="msg ${m.mine ? "me" : ""}" id="msg-${esc(m.id)}" data-msg="${esc(m.id)}">
         ${m.mine ? "" : `<div class="who">${esc(m.who)}${m.role ? ` <b>· ${esc(m.role)}</b>` : ""}</div>`}
         ${m.replyTo ? `<button class="svarpaa" data-hopp="${esc(m.replyTo)}">
-            <span class="svarnavn">${esc(svarPaa ? (svarPaa.mine ? "Deg" : svarPaa.who) : "Slettet melding")}</span>
-            <span class="svartekst">${esc(svarPaa ? svarPaa.txt : "meldingen finnes ikke lenger")}</span>
+            <span class="svargrow">
+              <span class="svarnavn">${esc(svarPaa ? (svarPaa.mine ? "Deg" : svarPaa.who) : "Slettet melding")}</span>
+              <span class="svartekst">${esc(svarPaa
+                  ? (svarPaa.txt || (svarPaa.bilde ? "Bilde" : ""))
+                  : "meldingen finnes ikke lenger")}</span>
+            </span>
+            ${svarPaa && svarPaa.bilde && Api.bildeAdresse(svarPaa.bilde)
+              ? `<img class="svarbilde" src="${esc(Api.bildeAdresse(svarPaa.bilde))}" alt="">` : ""}
           </button>` : ""}
         ${m.bilde ? `<button class="bildeboks" data-bilde="${esc(m.bilde)}">
             ${Api.bildeAdresse(m.bilde)
@@ -745,6 +759,8 @@ const UI = (() => {
      holdet — ellers ville et sveip også åpnet emojivelgeren. */
   let avbrytGest = null;         // stopper sveip og hold naar lista blar
 
+  let sisteHold = 0;
+
   function settOppMeldingsgester() {
     const boks = $("screen").querySelector(".msgs");
     if (!boks) return;
@@ -757,7 +773,9 @@ const UI = (() => {
       // Med mus skal man kunne merke tekst; der finnes knappen på
       // meldingen i stedet for sveip og hold.
       if (e.pointerType === "mouse") return;
-      if (e.target.closest("button, a")) return;
+      // Bildet er også en knapp, men et hold på det skal gi valgene —
+      // lagre, reagere, svare — på samme måte som et hold på teksten.
+      if (e.target.closest("button, a") && !e.target.closest(".bildeboks")) return;
       rad = e.target.closest(".msg");
       if (!rad) return;
       startX = e.clientX; startY = e.clientY; sveiper = false;
@@ -768,6 +786,9 @@ const UI = (() => {
         const id = rad.dataset.msg;
         rad = null;
         if (navigator.vibrate) navigator.vibrate(12);
+        // Holdt du på et bilde, kommer det et trykk etterpå som ellers
+        // ville åpnet bildet i full skjerm oppå valgene du nettopp fikk.
+        sisteHold = Date.now();
         sheetEmoji(id);
       }, 450);
     });
@@ -826,7 +847,7 @@ const UI = (() => {
   function startSvar(id) {
     const m = Api.messages(S.openChat).find(x => x.id === id);
     if (!m) return;
-    S.svarTil = { id: m.id, who: m.mine ? "deg selv" : m.who, txt: m.txt };
+    S.svarTil = { id: m.id, who: m.mine ? "deg selv" : m.who, txt: m.txt || "", bilde: m.bilde || null };
     render();
     const inn = $("msgInput");
     if (inn) inn.focus();
@@ -844,15 +865,25 @@ const UI = (() => {
   function sheetEmoji(id) {
     const m = Api.messages(S.openChat).find(x => x.id === id);
     const rea = Api.reactions(S.openChat, id);
-    openSheet(`<h3>Reager</h3>
-      ${m ? `<p class="muted" style="margin:6px 0 14px">${esc(m.txt.slice(0, 90))}${m.txt.length > 90 ? "…" : ""}</p>` : ""}
+    const bilde = m && m.bilde;
+    const txt = (m && m.txt) || "";
+    if (bilde) forberedBlob(bilde);
+
+    openSheet(`<h3>${bilde ? "Bilde" : "Reager"}</h3>
+      ${bilde ? `<div class="sheetbilde"><img src="${esc(Api.bildeAdresse(bilde) || "")}" alt=""></div>` : ""}
+      ${txt ? `<p class="muted" style="margin:6px 0 14px">${esc(txt.slice(0, 90))}${txt.length > 90 ? "…" : ""}</p>` : ""}
       <div class="emojirad">
         ${EMOJIER.map(e => `<button class="emojiknapp" data-emoji="${e}" data-pa="${esc(id)}">${e}</button>`).join("")}
       </div>
       ${rea.length ? `<div class="eyebrow" style="margin:18px 0 8px">Hvem har reagert</div>
         <div class="memberlist">${rea.map(r => `<div class="person">
           <span>${esc(r.emoji)} ${esc(r.navn.join(", "))}</span></div>`).join("")}</div>` : ""}
-      <button class="btn" style="width:100%;margin-top:14px" data-svar="${esc(id)}">Svar på meldingen</button>
+      <div class="stack" style="margin-top:14px">
+        <button class="btn" data-svar="${esc(id)}">Svar på ${bilde && !txt ? "bildet" : "meldingen"}</button>
+        ${bilde ? `<button class="btn" data-lagrebilde="${esc(bilde)}">${ICON.last} Lagre bildet</button>
+          ${m.mine || S.trip.role === "leader"
+            ? `<button class="btn danger" data-slettbilde="${esc(bilde)}">Slett bildet</button>` : ""}` : ""}
+      </div>
       <button class="btn close" data-close>Lukk</button>`);
   }
 
@@ -1182,23 +1213,31 @@ const UI = (() => {
       slot.innerHTML = `
         ${S.nye ? `<button class="nyepill" data-nye="1">${S.nye} ny${S.nye === 1 ? " melding" : "e meldinger"} ↓</button>` : ""}
         ${S.svarTil ? `<div class="svarforhaand">
+          ${S.svarTil.bilde && Api.bildeAdresse(S.svarTil.bilde)
+            ? `<img class="svarbilde" src="${esc(Api.bildeAdresse(S.svarTil.bilde))}" alt="">` : ""}
           <div class="svarinfo">
             <b>Svarer ${esc(S.svarTil.who)}</b>
-            <span>${esc(S.svarTil.txt.slice(0, 80))}${S.svarTil.txt.length > 80 ? "…" : ""}</span>
+            <span>${esc(S.svarTil.txt.slice(0, 80) || (S.svarTil.bilde ? "Bilde" : ""))}${S.svarTil.txt.length > 80 ? "…" : ""}</span>
           </div>
           <button class="minibtn" id="avbrytSvar" aria-label="Avbryt svaret">✕</button>
         </div>` : ""}
         <form class="composer" id="composer">
-          ${S.trip.bilder ? `<label class="bildeknapp" aria-label="Send bilde">
+          ${S.trip.bilder ? `${harKamera() ? `<label class="bildeknapp" aria-label="Ta bilde">
             ${ICON.bilde}
+            <input type="file" accept="image/*" capture="environment" id="kameraInput">
+          </label>` : ""}
+          <label class="bildeknapp" aria-label="Velg bilde fra bildene dine">
+            ${ICON.bibliotek}
             <input type="file" accept="image/*" id="bildeInput">
           </label>` : ""}
           <input id="msgInput" placeholder="${S.svarTil ? "Skriv svaret…" : "Melding til " + esc(conv.name) + "…"}" autocomplete="off" enterkeyhint="send" maxlength="2000">
           <button class="send" type="submit" aria-label="Send melding">${ICON.send}</button>
         </form>`;
       $("composer").addEventListener("submit", onSend);
-      const bildeFelt = $("bildeInput");
-      if (bildeFelt) bildeFelt.addEventListener("change", sendBilde);
+      for (const id of ["bildeInput", "kameraInput"]) {
+        const felt = $(id);
+        if (felt) felt.addEventListener("change", sendBilde);
+      }
       const avbryt = $("avbrytSvar");
       if (avbryt) avbryt.addEventListener("click", () => { S.svarTil = null; render(); });
       settOppMeldingsgester();
@@ -1274,6 +1313,7 @@ const UI = (() => {
   }
 
   window.addEventListener("popstate", () => {
+    if (lukkBilde(true)) return;
     if (S.side) return lukkSide(true);
     if (S.openChat) closeChat(true);
   });
@@ -1342,22 +1382,76 @@ const UI = (() => {
     }
   }
 
-  /* Trykker du på et bilde, skal du se det i full størrelse. */
-  function visBilde(sti) {
+  /* Trykker du på et bilde, fyller det skjermen — ikke et ark med bildet
+     nedskalert inni. Tilbakeknappen øverst til venstre, og telefonens egen
+     tilbakebevegelse, går ut igjen. */
+  function visBilde(sti, fraHistorikk) {
     const url = Api.bildeAdresse(sti);
     if (!url) return toast("Bildet lastes fortsatt.");
-    const msgs = Api.messages(S.openChat);
-    const m = msgs.find(x => x.bilde === sti);
-    const mitt = m && m.mine;
+    const m = Api.messages(S.openChat).find(x => x.bilde === sti);
 
-    openSheet(`<h3>Bilde</h3>
-      <img src="${esc(url)}" alt="" style="width:100%;border-radius:12px;margin:4px 0 14px">
-      <div class="stack">
-        <a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Åpne i full størrelse</a>
-        ${mitt || S.trip.role === "leader"
-          ? `<button class="btn danger" data-slettbilde="${esc(sti)}">Slett bildet</button>` : ""}
+    lukkBilde(true);
+    const el = document.createElement("div");
+    el.className = "bildevisning";
+    el.id = "bildevisning";
+    el.dataset.sti = sti;
+    el.innerHTML = `
+      <div class="bvtopp">
+        <button class="bvknapp" data-bvlukk aria-label="Tilbake">${ICON.tilbake}</button>
+        <span class="bvnavn">${m ? esc(m.mine ? "Deg" : m.who) + " · " + esc(dayStamp(m.ts)) : ""}</span>
+        ${m ? `<button class="bvknapp" data-bvmeny="${esc(m.id)}" aria-label="Flere valg">⋯</button>`
+            : `<span class="bvknapp" aria-hidden="true"></span>`}
       </div>
-      <button class="btn close" data-close>Lukk</button>`);
+      <img src="${esc(url)}" alt="Bilde i chatten">`;
+    document.body.appendChild(el);
+    forberedBlob(sti);
+    if (!fraHistorikk) history.pushState({ bilde: sti }, "");
+  }
+
+  function lukkBilde(fraHistorikk) {
+    const el = $("bildevisning");
+    if (!el) return false;
+    el.remove();
+    if (!fraHistorikk && history.state && history.state.bilde) history.back();
+    return true;
+  }
+
+  /* Bildet hentes ned i bakgrunnen med en gang du åpner det eller menyen.
+     Deletjenesten på iPhone må startes i samme trykk som du gjorde, og da
+     er det for sent å begynne å laste ned. */
+  const bildefiler = new Map();
+  async function forberedBlob(sti) {
+    if (bildefiler.has(sti)) return bildefiler.get(sti);
+    const url = Api.bildeAdresse(sti);
+    if (!url) return null;
+    try {
+      const blob = await fetch(url).then(r => r.ok ? r.blob() : null);
+      if (!blob) return null;
+      const fil = new File([blob], "tourflow.jpg", { type: blob.type || "image/jpeg" });
+      bildefiler.set(sti, fil);
+      return fil;
+    } catch { return null; }
+  }
+
+  /* «Lagre på kamerarull» finnes ikke som noe nettsider får lov til. Det
+     nærmeste er delemenyen, der iPhone selv tilbyr «Lagre bilde». Har
+     telefonen ikke den, laster vi ned fila i stedet. */
+  async function lagreBilde(sti) {
+    const fil = bildefiler.get(sti) || await forberedBlob(sti);
+    if (!fil) return toast("Klarte ikke hente bildet.");
+
+    if (navigator.canShare && navigator.canShare({ files: [fil] })) {
+      try { await navigator.share({ files: [fil] }); return; }
+      catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(fil);
+    a.download = "tourflow.jpg";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+    toast("Bildet er lastet ned.");
   }
 
   /* ───────────────── send melding ───────────────── */
@@ -2932,7 +3026,7 @@ const UI = (() => {
 
   /* ───────────────── hendelser ───────────────── */
   document.addEventListener("click", async e => {
-    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
+    const t = e.target.closest("[data-tab],[data-day],[data-channel],[data-sheet],[data-opentrip],[data-close],[data-copy],[data-edit],[data-delitem],[data-delday],[data-delmsg],[data-leave],[data-deltrip],[data-members],[data-openchat],[data-item],[data-kopi],[data-skjul],[data-vis],[data-kartapne],[data-kartlukk],[data-nye],[data-eldre],[data-msgmeny],[data-chat],[data-paa],[data-slettchat],[data-bilde],[data-slettbilde],[data-bvlukk],[data-bvmeny],[data-lagrebilde],[data-chatside],[data-cmadd],[data-cmdel],[data-cmleave],[data-rolle],[data-godkjenn],[data-avvis],[data-fjern],#authTilbake,#joinTilbake,[data-emoji],[data-hopp],[data-svar],#tripBtn,#meBtn,#resetBtn,#backBtn,#skjulInstall,#installKnapp");
     if (!t) return;
 
     if (t.id === "joinTilbake") { S.fraStart = false; return visAuth("start"); }
@@ -3071,13 +3165,20 @@ const UI = (() => {
       } catch (e) { return toast(e.message || "Klarte ikke endre."); }
     }
 
-    if (t.dataset.bilde) return visBilde(t.dataset.bilde);
+    if (t.dataset.bilde) {
+      if (Date.now() - sisteHold < 700) return;   // holdt, ikke trykket
+      return visBilde(t.dataset.bilde);
+    }
+    if (t.hasAttribute("data-bvlukk")) return lukkBilde();
+    if (t.dataset.bvmeny) return sheetEmoji(t.dataset.bvmeny);
+    if (t.dataset.lagrebilde) return lagreBilde(t.dataset.lagrebilde);
 
     if (t.dataset.slettbilde) {
       if (!confirm("Slette bildet for alle? Det kan ikke angres.")) return;
       try {
         await Api.slettBilde(t.dataset.slettbilde);
         closeSheet();
+        lukkBilde();
         await Api.loadMessages(S.trip.id, S.openChat);
         render();
         toast("Bildet er slettet.");
@@ -3122,7 +3223,7 @@ const UI = (() => {
     if (t.dataset.emoji) { closeSheet(); return reager(t.dataset.pa, t.dataset.emoji); }
     if (t.dataset.msgmeny) return sheetEmoji(t.dataset.msgmeny);
     if (t.dataset.hopp) return hoppTil(t.dataset.hopp);
-    if (t.dataset.svar) { closeSheet(); return startSvar(t.dataset.svar); }
+    if (t.dataset.svar) { closeSheet(); lukkBilde(); return startSvar(t.dataset.svar); }
     if (t.dataset.item) return sheetItem(t.dataset.item);
     if (t.dataset.kopi) {
       try { await navigator.clipboard.writeText(t.dataset.kopi); toast("Kopiert: " + t.dataset.kopi); }
@@ -3214,6 +3315,7 @@ const UI = (() => {
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
     if (!$("sheetBg").hidden) return closeSheet();
+    if (lukkBilde()) return;
     if (S.side) return lukkSide();
     closeChat();
   });
