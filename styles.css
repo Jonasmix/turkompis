@@ -241,8 +241,14 @@ button,input,select,textarea{font:inherit;color:inherit}
    på toppen, slo ikke dra-ned inn heller. */
 .sheet{width:100%;max-width:560px;background:var(--surface);border-radius:20px 20px 0 0;
   max-height:86dvh;display:flex;flex-direction:column;overflow:hidden;animation:up .18s ease-out}
-.sheetbody{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+/* Arket skroller opp og ned, aldri til siden. Stakk noe litt utenfor —
+   et klokkeslettfelt som tok seg til rette — kunne hele skjemaet dras
+   sidelengs, og det så ut som appen hadde løsnet. */
+.sheetbody{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
   padding:0 18px calc(24px + var(--safe-b))}
+/* Safari gir klokkeslett- og datofelt en egen bredde som ikke bryr seg om
+   boksen de står i. Her holder de seg innenfor. */
+input[type="time"],input[type="date"]{width:100%;max-width:100%;min-width:0}
 @keyframes up{from{transform:translateY(14px)}to{transform:none}}
 .sheet .grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 16px}
 .sheet h3{font-size:19px}

@@ -761,6 +761,17 @@ const UI = (() => {
 
   let sisteHold = 0;
 
+  /* Sant i det korte øyeblikket mellom at vi ber om tilbake selv, og at
+     nettleseren svarer. Da skal tilbakelytteren holde fingrene av fatet. */
+  let egenTilbake = false;
+  const gaaTilbake = () => {
+    egenTilbake = true;
+    // Finnes det ikke noe å gå tilbake til, kommer svaret aldri. Da skal
+    // ikke flagget bli stående og sluke neste ekte tilbake.
+    setTimeout(() => { egenTilbake = false; }, 400);
+    history.back();
+  };
+
   function settOppMeldingsgester() {
     const boks = $("screen").querySelector(".msgs");
     if (!boks) return;
@@ -1356,11 +1367,15 @@ const UI = (() => {
     Api.unsubscribeChannel();
     Api.erHer(S.trip.id, null);
     render();
-    if (!fromHistory && history.state && history.state.chat) history.back();
+    if (!fromHistory && history.state && history.state.chat) gaaTilbake();
     return true;
   }
 
   window.addEventListener("popstate", () => {
+    // Gikk vi tilbake selv — fordi du lukket bildet eller siden — er
+    // jobben alt gjort. Uten dette gikk turen videre nedover: bildet
+    // lukket seg, og så lukket chatten seg like etter.
+    if (egenTilbake) { egenTilbake = false; return; }
     if (lukkBilde(true)) return;
     if (S.side) return lukkSide(true);
     if (S.openChat) closeChat(true);
@@ -1460,7 +1475,7 @@ const UI = (() => {
     if (!el) return false;
     el.remove();
     morkTopp(false);
-    if (!fraHistorikk && history.state && history.state.bilde) history.back();
+    if (!fraHistorikk && history.state && history.state.bilde) gaaTilbake();
     return true;
   }
 
@@ -2688,7 +2703,7 @@ const UI = (() => {
     if (!S.side) return false;
     S.side = null;
     render();
-    if (!fraHistorikk && history.state && history.state.side) history.back();
+    if (!fraHistorikk && history.state && history.state.side) gaaTilbake();
     return true;
   }
 
