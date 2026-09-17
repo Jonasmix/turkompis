@@ -291,7 +291,11 @@ const UI = (() => {
     S.trip = trip;
     S.offline = Boolean(trip.stale);
     Api.setLastTrip(tripId);
-    S.day = Parse.baseDate(trip) || (trip.days[0] ? trip.days[0].date : null);
+    // Sto du på torsdag og rettet et klokkeslett, skal du fortsatt stå på
+    // torsdag etterpå. Appen henter turen på nytt etter hver endring, og
+    // før denne linja begynte den da forfra på dagens dato hver gang.
+    const sammeDag = S.day && trip.days.some(d => d.date === S.day) && S.trip && S.trip.id === tripId;
+    S.day = sammeDag ? S.day : (Parse.baseDate(trip) || (trip.days[0] ? trip.days[0].date : null));
 
     // Bytter du tur, lukkes samtalen og sidene du hadde åpne.
     S.openChat = null;
@@ -1871,17 +1875,20 @@ const UI = (() => {
     }
 
     let utenTid = 0;
+    let foreslatt = 0;
     const bolker = dager.map((d, i) => {
       const dag = Api.fmtDay(d.dato);
 
       const punkter = (d.punkter || []).map((p, j) => {
         if (!p.tid) utenTid++;
+        if (p.adresseForslag && !p.stedAdresse) foreslatt++;
         return `<div class="imprad">
           <label class="impvelg">
             <input type="checkbox" data-punkt="${i}-${j}" checked>
             <span class="imptxt">
               ${p.tid ? `<b class="mono">${esc(p.tid)}</b> ` : ""}${esc(p.tittel)}
-              ${p.stedNavn ? `<small>${esc(p.stedNavn)}</small>` : ""}
+              ${p.stedNavn ? `<small>${esc(p.stedNavn)}${p.adresseForslag && !p.stedAdresse
+                ? ` · <b style="color:var(--amber)">adresse foreslått</b>` : ""}</small>` : ""}
             </span>
           </label>
           ${p.tid ? "" : `<div class="imptid">
@@ -1901,6 +1908,13 @@ const UI = (() => {
           </div>
           ${d.hotellAdresse
             ? `<small>${esc(d.hotellAdresse)}</small>`
+            : d.hotellAdresseForslag
+            // Forslaget kom fra modellen, ikke fra heftet. Det står i feltet
+            // så det er lett å godta — men merket, så ingen tror det er lest
+            // ut av dokumentet.
+            ? `<input data-hoteladr="${i}" value="${esc(d.hotellAdresseForslag)}">
+               <small><b style="color:var(--amber)">Foreslått av appen</b> — sto ikke i filen.
+               Sjekk at den stemmer før du godtar den, eller tøm feltet.</small>`
             : `<input data-hoteladr="${i}" placeholder="Lim inn adressen her">
                <small>Filen oppga ${d.hotellNettside ? "bare en nettlenke" : "ingen adresse"}.
                Kopier navnet, søk det opp i kart, og lim adressen inn her — ellers virker ikke veibeskrivelsen.</small>`}
@@ -1918,6 +1932,11 @@ const UI = (() => {
     openSheet(`<h3>Forslag fra filen</h3>
       <p class="muted" style="margin:6px 0 14px">
         ${dager.length} dager og ${antall} punkter, i samme rekkefølge som i filen.</p>
+      ${foreslatt ? `<div class="card pad" style="padding-block:12px;margin-bottom:14px;border-left:3px solid var(--amber)">
+        <div class="eyebrow" style="color:var(--amber)">${foreslatt} adresser er foreslått av appen</div>
+        <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">De sto ikke i filen. Appen har
+        fylt dem inn for steder den mener er kjente nok til at adressen er sikker — men den kan ta
+        feil, og da sender veibeskrivelsen folk feil sted. De er merket i lista under.</p></div>` : ""}
       ${utenTid ? `<div class="card pad" style="padding-block:12px;margin-bottom:14px;border-left:3px solid var(--blue)">
         <div class="eyebrow" style="color:var(--blue-ink)">${utenTid} punkter uten klokkeslett</div>
         <p style="margin:7px 0 0;font-size:13.5px;color:var(--ink-2)">Filen oppga ingen tid for disse.
@@ -1979,7 +1998,9 @@ const UI = (() => {
         for (const { p, j } of valgte) {
           const tidFelt = document.querySelector(`[data-tid="${i}-${j}"]`);
           const tid = p.tid || (tidFelt ? tidFelt.value : "");
-          const sid = await stedId(p.stedNavn, p.stedAdresse, "Sted");
+          // Sto adressen i filen, vinner den. Ellers tar vi forslaget —
+          // det er merket i lista du nettopp godkjente.
+          const sid = await stedId(p.stedNavn, p.stedAdresse || p.adresseForslag, "Sted");
           await Api.addItem(S.trip.id, dagId, {
             t: /^\d{2}:\d{2}$/.test(tid) ? tid : null,
             title: p.tittel || "Programpunkt",
