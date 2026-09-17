@@ -1465,7 +1465,6 @@ const UI = (() => {
       <img src="${esc(url)}" alt="Bilde i chatten">`;
     document.body.appendChild(el);
     dragNedForAaLukke(el);
-    morkTopp(true);
     forberedBlob(sti);
     if (!fraHistorikk) history.pushState({ bilde: sti }, "");
   }
@@ -1474,18 +1473,8 @@ const UI = (() => {
     const el = $("bildevisning");
     if (!el) return false;
     el.remove();
-    morkTopp(false);
     if (!fraHistorikk && history.state && history.state.bilde) gaaTilbake();
     return true;
-  }
-
-  /* Stripa med klokka og batteriet tar fargen fra siden under. Står den
-     hvit over et svart bilde, ser det ut som appen slutter midt på
-     skjermen. Så lenge bildet vises, er den svart som resten. */
-  function morkTopp(paa) {
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", paa ? "#06090D" : "#14508C");
-    document.body.style.background = paa ? "#06090D" : "";
   }
 
   /* Dra bildet nedover for å legge det bort, slik man gjør i bildeapper.
@@ -1505,7 +1494,7 @@ const UI = (() => {
       dy = e.touches[0].clientY - startY;
       if (dy < 0) dy = dy / 4;                    // oppover gir etter, men lukker ikke
       el.style.transform = `translateY(${dy}px)`;
-      el.style.background = `rgba(6,9,13,${Math.max(0.2, 1 - Math.abs(dy) / 500)})`;
+      el.style.background = `rgba(255,255,255,${Math.max(0.35, 1 - Math.abs(dy) / 500)})`;
       if (e.cancelable) e.preventDefault();
     }, { passive: false });
 

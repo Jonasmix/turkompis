@@ -163,17 +163,18 @@ button,input,select,textarea{font:inherit;color:inherit}
   -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;pointer-events:none}
 .bildelaster{display:grid;place-items:center;min-height:90px;line-height:1}
 
-/* Bildet i full skjerm. Svart bakgrunn, bildet i sin egen form midt i, og
-   en tilbakeknapp der tommelen alt ligger. */
-.bildevisning{position:fixed;inset:0;z-index:18;background:#06090D;display:flex;flex-direction:column}
+/* Bildet i full skjerm. Hvit bakgrunn, ikke svart: stripa med klokka
+   tegnes av telefonen og er hvit uansett hva vi ber om. Da er det bedre
+   at siden møter den enn at det står en lys stripe over et svart bilde. */
+.bildevisning{position:fixed;inset:0;z-index:18;background:#FFFFFF;display:flex;flex-direction:column}
 .bildevisning img{flex:1;min-height:0;width:100%;object-fit:contain;
   -webkit-touch-callout:default;padding:0 0 calc(10px + var(--safe-b))}
 .bvtopp{flex:none;display:flex;align-items:center;gap:8px;padding:calc(8px + var(--safe-t)) 8px 8px}
-.bvnavn{flex:1;min-width:0;text-align:center;color:rgba(255,255,255,.82);
+.bvnavn{flex:1;min-width:0;text-align:center;color:var(--ink-2);
   font-family:"Archivo",sans-serif;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bvknapp{width:42px;height:42px;flex:none;border:0;border-radius:50%;background:rgba(255,255,255,.12);
-  color:#fff;cursor:pointer;display:grid;place-items:center;font-size:20px;line-height:1}
-.bvknapp svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bvknapp{width:42px;height:42px;flex:none;border:0;border-radius:50%;background:var(--surface-2);
+  color:var(--ink);cursor:pointer;display:grid;place-items:center;font-size:20px;line-height:1}
+.bvknapp svg{width:20px;height:20px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 /* Miniatyren i et svar, og bildet øverst i valgmenyen. */
 .svarbilde{flex:none;width:38px;height:38px;border-radius:7px;object-fit:cover}
