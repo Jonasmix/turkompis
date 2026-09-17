@@ -48,8 +48,15 @@ const UI = (() => {
     });
   }
 
-  const mapsGoogle = p => "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.name + ", " + p.addr) + "&travelmode=transit";
-  const mapsApple  = p => "https://maps.apple.com/?daddr=" + encodeURIComponent(p.name + ", " + p.addr) + "&dirflg=r";
+  /* Reisemåten følger med i lenka: uten den gjetter kartappen selv, og
+     Apple gjetter bil — som ingen i klassen har. */
+  const GOOGLEMODUS = { fots: "walking", kollektiv: "transit", bil: "driving" };
+  const APPLEMODUS  = { fots: "w",       kollektiv: "r",       bil: "d" };
+
+  const mapsGoogle = p => "https://www.google.com/maps/dir/?api=1&destination="
+    + encodeURIComponent(p.name + ", " + p.addr) + "&travelmode=" + GOOGLEMODUS[Api.reisemaate()];
+  const mapsApple  = p => "https://maps.apple.com/?daddr="
+    + encodeURIComponent(p.name + ", " + p.addr) + "&dirflg=" + APPLEMODUS[Api.reisemaate()];
 
   /* Én knapp, ikke to. Hvilket kart som åpnes velger du én gang under
      Meg — det er ikke noe du skal ta stilling til hver gang du skal et
@@ -1149,7 +1156,8 @@ const UI = (() => {
             <span class="chev">${ICON.chev}</span></button>
           <button class="listrow" data-sheet="kartvalg">
             <div class="grow"><div class="nm">Kart</div>
-              <div class="sub">Veibeskrivelser åpnes i ${Api.kartValg() === "apple" ? "Apple Kart" : "Google Maps"}</div></div>
+              <div class="sub">${Api.kartValg() === "apple" ? "Apple Kart" : "Google Maps"} · ${
+                Api.reisemaate() === "fots" ? "til fots" : Api.reisemaate() === "kollektiv" ? "kollektivt" : "bil"}</div></div>
             <span class="chev">${ICON.chev}</span></button>
           <button class="listrow" data-sheet="about">
             <div class="grow"><div class="nm">Om appen og personvern</div></div>
@@ -3103,6 +3111,7 @@ const UI = (() => {
      samme kart på PC-en som på telefonen. */
   function sheetKartvalg() {
     const naa = Api.kartValg();
+    const reise = Api.reisemaate();
     openSheet(`<h3>Kart</h3>
       <p class="muted" style="margin:6px 0 14px">Veibeskrivelser åpnes i appen du velger her.
         Valget gjelder denne enheten.</p>
@@ -3111,6 +3120,16 @@ const UI = (() => {
           <span><b>Google Maps</b><br><small>Virker på både iPhone og Android</small></span></label>
         <label class="pick"><input type="radio" name="kartvalg" value="apple" ${naa === "apple" ? "checked" : ""}>
           <span><b>Apple Kart</b><br><small>Bare på iPhone, iPad og Mac</small></span></label>
+      </div>
+
+      <div class="eyebrow" style="margin:20px 0 8px">Hvordan dere kommer dit</div>
+      <div class="picks">
+        <label class="pick"><input type="radio" name="reisemaate" value="fots" ${reise === "fots" ? "checked" : ""}>
+          <span><b>Til fots</b><br><small>De siste hundre meterne fra bussen</small></span></label>
+        <label class="pick"><input type="radio" name="reisemaate" value="kollektiv" ${reise === "kollektiv" ? "checked" : ""}>
+          <span><b>Kollektivt</b><br><small>Metro, tog og buss</small></span></label>
+        <label class="pick"><input type="radio" name="reisemaate" value="bil" ${reise === "bil" ? "checked" : ""}>
+          <span><b>Bil</b><br><small>Hvis dere kjører selv</small></span></label>
       </div>
       <button class="btn close" data-close>Lukk</button>`);
   }
@@ -3428,6 +3447,15 @@ const UI = (() => {
   document.addEventListener("change", async e => {
     const m = e.target;
     if (!S.trip) return;
+
+    if (m.name === "reisemaate") {
+      Api.settReisemaate(m.value);
+      closeSheet();
+      render();
+      return toast(m.value === "fots" ? "Veibeskrivelser viser gangvei nå."
+        : m.value === "kollektiv" ? "Veibeskrivelser viser kollektivt nå."
+        : "Veibeskrivelser viser kjørerute nå.");
+    }
 
     if (m.name === "kartvalg") {
       Api.settKartValg(m.value);

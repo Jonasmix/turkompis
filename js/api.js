@@ -978,6 +978,15 @@ const Api = (() => {
   }
   const settKartValg = v => lsSet(LS.kart, v);
 
+  /* Hvordan dere kommer dere dit. På en klassetur går dere stort sett de
+     siste hundre meterne fra bussen, så det er til fots som er svaret
+     oftest — ikke tog, og ikke bil ingen av dere har. */
+  function reisemaate() {
+    const v = lsGet("tk.reise", null);
+    return v === "kollektiv" || v === "bil" ? v : "fots";
+  }
+  const settReisemaate = v => lsSet("tk.reise", v);
+
   /* Hvem som får døpe om en chat, avgjøres i basen: en åpen chat hører
      til reiselederen eller den som laget den, en privat til dem som er
      med i den. */
@@ -1497,7 +1506,7 @@ const Api = (() => {
     init, online, fmtDay,
     getProfile, setProfile, getLastTrip, setLastTrip, getLastChannel, setLastChannel,
     myTrips, joinByCode, createTrip, updateTrip, doppChat, flyttTur, antallVentende, glemTur,
-    kartValg, settKartValg, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
+    kartValg, settKartValg, reisemaate, settReisemaate, loadTrip, currentTrip, isLeader, leaveTrip, deleteTrip,
     messages, loadMessages, loadMoreMessages, harEldre, loadRecent, lastByChannel,
     settLest, erUlest, antallUleste,
     subscribeTrip, subscribeChannel, unsubscribeChannel, kobleFra,
