@@ -60,6 +60,10 @@ const felt = {
   ce2: `<div class="bunn">
       <div class="felt" contenteditable="true" data-plass="Contenteditable med knapp…"></div>
       <button class="knapp" type="button">&#8593;</button>
+    </div>`,
+  app: `<div class="bunn">
+      <input class="felt" placeholder="Som i appen…">
+      <button class="knapp" type="button">&#8593;</button>
     </div>`
 };
 
@@ -67,7 +71,8 @@ const navn = {
   form: "1 · Vanlig felt i skjema (slik appen er i dag)",
   input: "2 · Ett enkelt felt, uten skjema og uten knapp",
   ce: "3 · Contenteditable, helt alene på siden",
-  ce2: "4 · Contenteditable med sendeknapp"
+  ce2: "4 · Contenteditable med sendeknapp",
+  app: "5 · Nøyaktig som appen gjør det"
 };
 
 if (!felt[m]) {
@@ -80,7 +85,8 @@ if (!felt[m]) {
         k === "form" ? "Referanse. Her vet vi at linja kommer." :
         k === "input" ? "Ingenting annet å trykke på — ingen piler å bruke." :
         k === "ce" ? "Ikke et skjemafelt i det hele tatt." :
-        "Slik en ny skrivelinje ville sett ut."}</small></a>`).join("")}
+        k === "ce2" ? "Slik en ny skrivelinje ville sett ut." :
+        "Med samme forskyvning som appen bruker. Her teller bare det hvite."}</small></a>`).join("")}
     </div>`;
 } else {
   document.getElementById("app").innerHTML = `
@@ -102,8 +108,16 @@ if (!felt[m]) {
     const apent = vv && vv.height < full - 120;
     document.documentElement.style.setProperty("--h", (apent ? h : full) + "px");
 
+    // Appen flytter seg ned igjen når iOS skyver siden opp for å få feltet
+    // fram. Uten den forskyvningen ligger bunnen for høyt, og da ser det ut
+    // som det er mer tomrom enn det er.
+    const skyv = m === "app" && vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+    document.body.style.transform = skyv ? `translateY(${skyv}px)` : "";
+
     // Streken legges der siden slutter. Er det hvitt under den, er det
     // hvite ikke vårt — da er det iOS som tegner det.
+    // Streken ligger inne i body og blir med på forskyvningen selv, så
+    // den skal ikke legges til her.
     const bunn = apent ? h : full;
     strek.hidden = false; merke.hidden = false;
     strek.style.top = (bunn - 3) + "px";
