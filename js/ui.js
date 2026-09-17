@@ -1621,13 +1621,18 @@ const UI = (() => {
     let startY = 0, dy = 0, drar = false, kandidat = false, iHandtak = false;
 
     const kroppen = () => s.querySelector(".sheetbody");
+    const kontroll = el => el && el.closest("input, textarea, select, button, a, [contenteditable]");
 
     function start(mål, y) {
       iHandtak = !!(mål && mål.closest(".grabsone"));
-      // Bare håndtaket drar arket. Før kunne du dra hvor som helst i de
-      // øverste 140 pikslene, og i et skjema ligger det gjerne et felt der:
-      // bommet du litt på klokkeslettet, fulgte hele arket fingeren.
-      if (!iHandtak) return false;
+      if (!iHandtak) {
+        // Står du i et felt, skriver du — da skal ikke arket flytte seg.
+        if (kontroll(mål)) return false;
+        // Ellers: er du øverst, drar du hele arket, uansett hvor du tar
+        // tak. Er du lenger nede, skroller du.
+        const k = kroppen();
+        if (k && k.scrollTop > 0) return false;
+      }
       kandidat = true; drar = false; startY = y; dy = 0;
       return true;
     }
